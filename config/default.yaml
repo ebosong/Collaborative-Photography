@@ -1,0 +1,78 @@
+app:
+  mock_mode: true
+  loop_hz: 2.0
+  log_dir: logs
+
+llm:
+  provider: qwen_openai_compatible
+  api_key: ""
+  base_url: ""
+  model: qwen-plus
+  temperature: 0.1
+  timeout_s: 30
+  use_mock_when_unconfigured: true
+
+planner:
+  top_k: 2
+
+limits:
+  duration_s:
+    min: 3
+    max: 30
+    default: 8
+  distance_m:
+    min: 0.8
+    max: 4.0
+    default: 2.2
+  height_m:
+    min: 0.6
+    max: 1.8
+    default: 1.2
+  subject_scale_target:
+    min: 0.2
+    max: 0.7
+    default: 0.4
+  base:
+    max_linear_speed: 0.5
+    max_angular_speed: 0.6
+  lift:
+    max_delta_per_step: 0.05
+  allowed_templates:
+    - mid_follow
+    - side_front_follow
+    - mid_follow_safe
+  allowed_regions:
+    - left
+    - center
+    - right
+
+safety_defaults:
+  max_speed: 0.5
+  min_distance: 0.8
+  lost_target_action: slow_stop_and_search
+  fallback_template: mid_follow_safe
+
+tracker:
+  mode: mock
+  mock_sequence:
+    - detected: true
+      center_x: 0.45
+      center_y: 0.50
+      scale: 0.35
+    - detected: true
+      center_x: 0.55
+      center_y: 0.50
+      scale: 0.38
+    - detected: true
+      center_x: 0.52
+      center_y: 0.50
+      scale: 0.41
+    - detected: false
+      center_x: 0.50
+      center_y: 0.50
+      scale: 0.00
+
+arm:
+  enabled: false
+  port: COM7
+  baudrate: 115200

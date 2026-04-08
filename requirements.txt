@@ -1,0 +1,5 @@
+pydantic>=2.6
+PyYAML>=6.0
+langchain-core>=0.3
+langchain-openai>=0.2
+pyserial>=3.5

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "cambot_action_rules",
+    "text": "CamBot executes high-level filming tasks such as tracking the subject with framing, keeping distance, and stopping at the end. The LLM must output only structured filming parameters and task names, not motor or actuator commands."
+  },
+  {
+    "name": "framing_control_rules",
+    "text": "Rule-based control handles low-level actions. If the subject drifts left or right, adjust angular_z. If the subject scale is too small or too large, adjust linear_x. Lift motion should correct height gradually based on the target shot height."
+  },
+  {
+    "name": "coordination_notes",
+    "text": "Lift and base motion should remain conservative. Avoid sudden lift changes while tracking. The executor may reserve the arm interface for future presets, but the MVP should focus on chassis plus lift mock control."
+  }
+]

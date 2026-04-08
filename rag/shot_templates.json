@@ -1,0 +1,56 @@
+[
+  {
+    "name": "mid_follow",
+    "description": "A smooth medium follow shot that keeps the subject near the center while maintaining a moderate tracking distance.",
+    "allowed_ranges": {
+      "duration_s": [3, 20],
+      "distance_m": [1.2, 3.0],
+      "height_m": [0.9, 1.6],
+      "subject_scale_target": [0.3, 0.55]
+    },
+    "recommended_use": "General walking follow shots with steady framing and balanced subject size.",
+    "default_params": {
+      "duration_s": 8,
+      "distance_m": 2.2,
+      "height_m": 1.2,
+      "subject_region": "center",
+      "subject_scale_target": 0.4
+    }
+  },
+  {
+    "name": "side_front_follow",
+    "description": "A slightly angled follow shot from the side-front for more dynamic movement while keeping the subject readable.",
+    "allowed_ranges": {
+      "duration_s": [3, 18],
+      "distance_m": [1.4, 3.5],
+      "height_m": [1.0, 1.7],
+      "subject_scale_target": [0.28, 0.5]
+    },
+    "recommended_use": "Dynamic movement when the operator wants a more cinematic but still stable tracking angle.",
+    "default_params": {
+      "duration_s": 7,
+      "distance_m": 2.4,
+      "height_m": 1.25,
+      "subject_region": "center",
+      "subject_scale_target": 0.36
+    }
+  },
+  {
+    "name": "mid_follow_safe",
+    "description": "A conservative medium follow shot with slower motion and larger safety margins.",
+    "allowed_ranges": {
+      "duration_s": [3, 15],
+      "distance_m": [1.5, 3.0],
+      "height_m": [1.0, 1.5],
+      "subject_scale_target": [0.3, 0.45]
+    },
+    "recommended_use": "Fallback template for uncertain instructions, unstable tracking, or safety-first operation.",
+    "default_params": {
+      "duration_s": 6,
+      "distance_m": 2.0,
+      "height_m": 1.15,
+      "subject_region": "center",
+      "subject_scale_target": 0.35
+    }
+  }
+]
