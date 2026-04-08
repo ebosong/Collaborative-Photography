@@ -1,4 +1,6 @@
-﻿# CamBot MVP
+# CamBot MVP
+
+[English](./README.md) | [简体中文](./README-CN.md)
 
 仓库内最小可运行的单摄像头机器人拍摄 MVP。整体流程如下：
 
@@ -151,6 +153,7 @@ python app.py --instruction "Give me a smooth medium follow shot, keep the subje
    - `close()`
 4. 保持 [`runtime/cambot_executor.py`]不变
 5. 机械臂已经通过适配器接入，后续只需要在 [`runtime/arm_adapter.py`]中完善 `send_arm_command()` 即可
+
 ## 说明
 
 - LLM 只负责高层拍摄语义规划和 JSON 输出

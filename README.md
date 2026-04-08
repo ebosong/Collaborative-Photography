@@ -1,5 +1,7 @@
 # CamBot MVP
 
+[English](./README.md) | [简体中文](./README-CN.md)
+
 Minimal runnable single-camera robot filming pipeline inside this repository. The MVP flow is:
 
 Natural language instruction -> local JSON RAG retrieval -> prompt assembly -> LLM strict JSON plan -> pydantic validation and clipping -> mock execution loop -> printed low-level commands
