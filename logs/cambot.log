@@ -172,3 +172,259 @@
 2026-04-02 15:27:03 | INFO | ArmAdapter | Arm adapter closed.
 2026-04-02 15:27:03 | INFO | BaseController | Base controller closed.
 2026-04-02 15:27:03 | INFO | LiftController | Lift controller closed.
+2026-04-10 21:27:28 | INFO | Planner | Requesting filming plan from LLM provider.
+2026-04-10 21:27:30 | INFO | openai._base_client | Retrying request to /chat/completions in 0.438608 seconds
+2026-04-10 21:27:30 | INFO | openai._base_client | Retrying request to /chat/completions in 0.812372 seconds
+2026-04-10 21:27:31 | ERROR | app | CamBot app failed: Connection error.
+Traceback (most recent call last):
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_transports\default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\http_proxy.py", line 288, in handle_request
+    connect_response = self._connection.handle_request(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\connection.py", line 101, in handle_request
+    raise exc
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\connection.py", line 78, in handle_request
+    stream = self._connect(request)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_sync\connection.py", line 156, in _connect
+    stream = stream.start_tls(**kwargs)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_backends\sync.py", line 154, in start_tls
+    with map_exceptions(exc_map):
+  File "C:\Users\1\.conda\envs\roarm\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: EOF occurred in violation of protocol (_ssl.c:997)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\_base_client.py", line 1005, in request
+    response = self._client.send(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_client.py", line 914, in send
+    response = self._send_handling_auth(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_client.py", line 979, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_client.py", line 1014, in _send_single_request
+    response = transport.handle_request(request)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_transports\default.py", line 249, in handle_request
+    with map_httpcore_exceptions():
+  File "C:\Users\1\.conda\envs\roarm\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: EOF occurred in violation of protocol (_ssl.c:997)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\PythonProject\abc\app.py", line 60, in main
+    raw_plan = Planner(config).plan(prompt)
+  File "D:\PythonProject\abc\chain\planner.py", line 37, in plan
+    return chain.invoke({"prompt": prompt})
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_core\runnables\base.py", line 3157, in invoke
+    input_ = context.run(step.invoke, input_, config)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_core\language_models\chat_models.py", line 454, in invoke
+    self.generate_prompt(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_core\language_models\chat_models.py", line 1185, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_core\language_models\chat_models.py", line 995, in generate
+    self._generate_with_cache(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_core\language_models\chat_models.py", line 1297, in _generate_with_cache
+    result = self._generate(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_openai\chat_models\base.py", line 1488, in _generate
+    _handle_openai_api_error(e)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\langchain_openai\chat_models\base.py", line 1483, in _generate
+    raw_response = self.client.with_raw_response.create(**payload)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\_legacy_response.py", line 367, in wrapped
+    return cast(LegacyAPIResponse[R], func(*args, **kwargs))
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+  File "C:\Users\1\.conda\envs\roarm\lib\site-packages\openai\_base_client.py", line 1037, in request
+    raise APIConnectionError(request=request) from err
+openai.APIConnectionError: Connection error.
+2026-04-10 21:29:58 | INFO | Planner | Requesting filming plan from LLM provider.
+2026-04-10 21:29:58 | INFO | Planner | Using direct provider fallback because LangChain/live model setup is unavailable: No module named 'langchain_core'
+2026-04-10 21:29:58 | WARNING | LLMProvider | Falling back to mock LLM output: No module named 'langchain_openai'
+2026-04-10 21:29:58 | INFO | app | Validated plan: {"shot_plan":{"template":"mid_follow","duration_s":8,"distance_m":2.2,"height_m":1.2,"subject_region":"center","subject_scale_target":0.4},"robot_task":{"name":"track_subject_with_framing"},"safety_rules":{"max_speed":0.5,"min_distance":0.8,"lost_target_action":"slow_stop_and_search"},"fallback":{"template":"mid_follow_safe"}}
+2026-04-10 21:29:58 | INFO | CamBotExecutor | Starting CamBot executor for 8.00 seconds.
+2026-04-10 21:29:58 | INFO | BaseController | Base controller connected in mock mode.
+2026-04-10 21:29:58 | INFO | LiftController | Lift controller connected in mock mode at height 1.20 m.
+2026-04-10 21:29:58 | INFO | ArmAdapter | Arm adapter running in disabled/mock mode.
+2026-04-10 21:29:58 | INFO | ArmAdapter | [ARM CMD] preset=ready
+2026-04-10 21:29:58 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:29:58 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:29:58 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:29:58 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:29:59 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:29:59 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:29:59 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:29:59 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:29:59 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:29:59 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:29:59 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:29:59 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:30:00 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:30:00 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:30:00 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:30:00 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:30:00 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:30:00 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:30:00 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:30:00 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:30:00 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:00 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:30:01 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:30:01 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:30:01 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:01 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:30:01 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:30:01 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:30:01 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:01 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:30:02 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:30:02 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:30:02 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:30:02 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:30:02 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:30:02 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:30:02 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:30:02 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:30:02 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:02 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:30:03 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:30:03 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:30:03 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:03 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:30:03 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:30:03 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:30:03 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:03 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:30:04 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:30:04 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:30:04 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:30:04 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:30:04 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:30:04 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:30:04 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:30:04 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:30:04 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:04 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:30:05 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:30:05 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:30:05 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:05 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:30:05 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:30:05 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:30:05 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:30:05 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:30:06 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:30:06 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:30:06 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:30:06 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:30:06 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:30:06 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:30:06 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:30:06 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:30:06 | INFO | CamBotExecutor | CamBot executor finished planned duration cleanly.
+2026-04-10 21:30:06 | INFO | ArmAdapter | Arm adapter closed.
+2026-04-10 21:30:06 | INFO | BaseController | Base controller closed.
+2026-04-10 21:30:06 | INFO | LiftController | Lift controller closed.
+2026-04-10 21:31:46 | INFO | Planner | Requesting filming plan from LLM provider.
+2026-04-10 21:32:18 | INFO | openai._base_client | Retrying request to /chat/completions in 0.485533 seconds
+2026-04-10 21:32:45 | INFO | httpx | HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-10 21:32:45 | INFO | app | Validated plan: {"shot_plan":{"template":"mid_follow","duration_s":8,"distance_m":2.2,"height_m":1.2,"subject_region":"center","subject_scale_target":0.4},"robot_task":{"name":"track_subject_with_framing"},"safety_rules":{"max_speed":0.5,"min_distance":0.8,"lost_target_action":"slow_stop_and_search"},"fallback":{"template":"mid_follow_safe"}}
+2026-04-10 21:32:45 | INFO | CamBotExecutor | Starting CamBot executor for 8.00 seconds.
+2026-04-10 21:32:45 | INFO | BaseController | Base controller connected in mock mode.
+2026-04-10 21:32:45 | INFO | LiftController | Lift controller connected in mock mode at height 1.20 m.
+2026-04-10 21:32:45 | INFO | ArmAdapter | Arm adapter running in disabled/mock mode.
+2026-04-10 21:32:45 | INFO | ArmAdapter | [ARM CMD] preset=ready
+2026-04-10 21:32:45 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:32:45 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:32:45 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:45 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:32:46 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:32:46 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:32:46 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:46 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:32:46 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:32:46 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:32:46 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:46 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:32:47 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:32:47 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:32:47 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:32:47 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:32:47 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:32:47 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:32:47 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:32:47 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:32:47 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:47 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:32:48 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:32:48 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:32:48 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:48 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:32:48 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:32:48 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:32:48 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:48 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:32:49 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:32:49 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:32:49 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:32:49 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:32:49 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:32:49 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:32:49 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:32:49 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:32:49 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:49 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:32:50 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:32:50 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:32:50 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:50 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:32:50 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:32:50 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:32:50 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:50 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:32:51 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:32:51 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:32:51 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:32:51 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:32:51 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:32:51 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:32:51 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35}
+2026-04-10 21:32:51 | INFO | BaseController | [BASE CMD] linear_x=0.060 angular_z=0.075
+2026-04-10 21:32:51 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:51 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.45, 'center_y': 0.5, 'scale': 0.35} | control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0} | safe_control={'linear_x': 0.06000000000000005, 'angular_z': 0.07499999999999998, 'lift_delta': 0.0}
+2026-04-10 21:32:52 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38}
+2026-04-10 21:32:52 | INFO | BaseController | [BASE CMD] linear_x=0.024 angular_z=-0.075
+2026-04-10 21:32:52 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:52 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.55, 'center_y': 0.5, 'scale': 0.38} | control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0} | safe_control={'linear_x': 0.02400000000000002, 'angular_z': -0.07500000000000007, 'lift_delta': 0.0}
+2026-04-10 21:32:52 | INFO | Tracker | Tracker state: {'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41}
+2026-04-10 21:32:52 | INFO | BaseController | [BASE CMD] linear_x=-0.012 angular_z=-0.030
+2026-04-10 21:32:52 | INFO | LiftController | [LIFT CMD] move_by delta=0.000 new_height_m=1.200
+2026-04-10 21:32:52 | INFO | CamBotExecutor | Cycle summary | target={'detected': True, 'center_x': 0.52, 'center_y': 0.5, 'scale': 0.41} | control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0} | safe_control={'linear_x': -0.011999999999999943, 'angular_z': -0.030000000000000027, 'lift_delta': 0.0}
+2026-04-10 21:32:53 | INFO | Tracker | Tracker state: {'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0}
+2026-04-10 21:32:53 | WARNING | SafetyController | Target lost. Applying lost-target safety behavior.
+2026-04-10 21:32:53 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:32:53 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:32:53 | WARNING | CamBotExecutor | Target lost, entered minimal search/wait placeholder.
+2026-04-10 21:32:53 | INFO | CamBotExecutor | Cycle summary | target={'detected': False, 'center_x': 0.5, 'center_y': 0.5, 'scale': 0.0} | control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0} | safe_control={'linear_x': 0.0, 'angular_z': 0.0, 'lift_delta': 0.0}
+2026-04-10 21:32:53 | INFO | BaseController | [BASE CMD] STOP
+2026-04-10 21:32:53 | INFO | LiftController | [LIFT CMD] STOP
+2026-04-10 21:32:53 | INFO | CamBotExecutor | CamBot executor finished planned duration cleanly.
+2026-04-10 21:32:53 | INFO | ArmAdapter | Arm adapter closed.
+2026-04-10 21:32:53 | INFO | BaseController | Base controller closed.
+2026-04-10 21:32:53 | INFO | LiftController | Lift controller closed.

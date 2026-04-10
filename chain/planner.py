@@ -34,4 +34,11 @@ class Planner:
             return self.provider.generate(prompt)
 
         chain = chat_prompt | model | StrOutputParser()
-        return chain.invoke({"prompt": prompt})
+        try:
+            return chain.invoke({"prompt": prompt})
+        except Exception as exc:
+            self.logger.warning(
+                "LangChain planner request failed, using provider fallback: %s",
+                exc,
+            )
+            return self.provider.handle_generation_error(exc)

@@ -6,10 +6,11 @@ app:
 llm:
   provider: qwen_openai_compatible
   api_key: ""
-  base_url: ""
-  model: qwen-plus
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model: qwen3.6-plus
   temperature: 0.1
   timeout_s: 30
+  trust_env: false
   use_mock_when_unconfigured: true
 
 planner:
