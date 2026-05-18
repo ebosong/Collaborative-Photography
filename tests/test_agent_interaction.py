@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from agent.json_repair import JsonRepairer
+from agent.reviewer import PlanReviewer
 from agent.service import PlanAgentService
 from app import _normalize_command
 from schemas.script_schema import ScriptPlan
@@ -88,6 +89,15 @@ def test_cli_command_normalization() -> None:
     assert _normalize_command("\uff0fconfirm") == "confirm"
     assert _normalize_command(" confirm ") == "confirm"
     assert _normalize_command("\u786e\u8ba4") == "confirm"
+
+
+def test_review_includes_concrete_filming_actions() -> None:
+    review = PlanReviewer().render(_base_plan())
+
+    assert "\u5177\u4f53\u62cd\u6444\u52a8\u4f5c" in review
+    assert "\u51c6\u5907\u9636\u6bb5" in review
+    assert "\u8ddf\u62cd\u52a8\u4f5c" in review
+    assert "\u7ed3\u675f\u52a8\u4f5c" in review
 
 
 def test_confirm_plan_executes_current_plan(tmp_path) -> None:

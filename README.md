@@ -196,6 +196,7 @@ Notes:
 ## Notes
 
 - The LLM only plans high-level filming parameters.
+- The current JSON schema is a single high-level filming plan, not an explicit phased action list. The natural-language review derives concrete filming actions from that JSON so users can understand how the executor will behave.
 - JSON repair first tries extraction and strict validation, then asks the configured provider to repair the JSON, then falls back to the previous valid plan when available.
 - Natural-language review is rendered from validated JSON so the user-facing description stays aligned with the machine-readable plan.
 - Low-level motion remains rule-based in `runtime/framing_controller.py` and `runtime/safety_controller.py`.
