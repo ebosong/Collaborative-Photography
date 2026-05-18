@@ -6,7 +6,7 @@ CamBot now uses an interactive LLM agent for filming-plan design. The agent keep
 
 Current flow:
 
-Natural-language instruction -> local JSON RAG retrieval -> LLM strict JSON plan -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> optional executor run
+Natural-language instruction -> local JSON RAG retrieval -> LLM strict JSON plan -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> executor run
 
 ## Current Scope
 
@@ -18,7 +18,7 @@ Natural-language instruction -> local JSON RAG retrieval -> LLM strict JSON plan
 - Save JSON, review text, conversation history, and metadata per session
 - Expose a web-ready Python service layer for future frontend integration
 - Continue to support the existing Qwen/OpenAI-compatible provider and mock fallback
-- Keep low-level robot execution separate and optional
+- Run the executor from the CLI after confirmation while keeping web service confirmation/execution separate
 
 ## Repository Structure
 
@@ -90,7 +90,7 @@ Interactive commands:
 
 ```text
 /review     show the current natural-language shooting plan
-/confirm    confirm and save the current plan
+/confirm    confirm, save, and execute the current plan
 /unconfirm  cancel confirmation and keep editing
 /quit       exit
 ```
@@ -101,17 +101,17 @@ Any other input is treated as a natural-language revision request, such as:
 Move the subject to the left side and make the shot a little closer.
 ```
 
-After `/confirm`, the user may still continue typing revision feedback. The session automatically becomes editable again.
+After `/confirm`, the CLI sends the confirmed plan to the existing CamBot executor and exits when execution finishes.
 
-## Optional Execution
+## Save Without Execution
 
-By default, confirmation only saves the plan. To run the existing mock executor after confirmation:
+For planning-only debugging, disable execution after confirmation:
 
 ```bash
-python app.py --instruction "A stable centered follow shot." --execute-after-confirm
+python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
 ```
 
-Low-level hardware-facing commands are still handled by `runtime/` and remain separate from the LLM agent.
+The web-facing service still keeps `confirm_plan()` and `execute_confirmed_plan()` separate, so a future frontend can decide exactly when to dispatch the plan. Low-level hardware-facing commands are still handled by `runtime/`.
 
 ## Session Logs
 

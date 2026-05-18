@@ -6,7 +6,7 @@ CamBot 现在使用交互式 LLM Agent 来设计拍摄方案。Agent 内部持�
 
 当前流程：
 
-自然语言拍摄需求 -> 本地 JSON RAG 检索 -> LLM 生成严格 JSON 拍摄计划 -> JSON 修复与校验 -> 自然语言 review -> 使用者继续修改 -> 使用者确认 -> 可选执行器运行
+自然语言拍摄需求 -> 本地 JSON RAG 检索 -> LLM 生成严格 JSON 拍摄计划 -> JSON 修复与校验 -> 自然语言 review -> 使用者继续修改 -> 使用者确认 -> 执行器运行
 
 ## 当前范围
 
@@ -18,7 +18,7 @@ CamBot 现在使用交互式 LLM Agent 来设计拍摄方案。Agent 内部持�
 - 每个会话保存 JSON、review 文本、对话历史和元信息
 - 提供面向未来网页后端调用的 Python service 层
 - 继续兼容现有 Qwen/OpenAI-compatible provider 和 mock fallback
-- 底层机器人执行仍然独立，并且默认不自动执行
+- 命令行在确认后会下发执行，网页 service 仍保留确认和执行分离
 
 ## 目录结构
 
@@ -90,7 +90,7 @@ python app.py --instruction "Give me a smooth medium follow shot, keep the subje
 
 ```text
 /review     查看当前自然语言拍摄方案
-/confirm    确认并保存当前方案
+/confirm    确认、保存并执行当前方案
 /unconfirm  取消确认，继续修改
 /quit       退出
 ```
@@ -101,14 +101,14 @@ python app.py --instruction "Give me a smooth medium follow shot, keep the subje
 把主体放到画面左侧，镜头再靠近一点。
 ```
 
-执行 `/confirm` 之后，使用者仍然可以继续输入修改意见。系统会自动取消确认，并基于已确认版本继续修改。
+执行 `/confirm` 后，命令行会把确认后的方案下发给现有 CamBot 执行器，执行结束后退出。`agent.service.PlanAgentService` 仍然保留 `confirm_plan()` 和 `execute_confirmed_plan()` 两个独立接口，方便未来网页自行决定何时下发。
 
-## 可选执行
+## 只保存不执行
 
-默认情况下，确认只保存方案，不自动运行执行器。若希望确认后运行现有 mock 执行器：
+如果只想调试规划流程，不想在确认后运行执行器：
 
 ```bash
-python app.py --instruction "A stable centered follow shot." --execute-after-confirm
+python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
 ```
 
 底层硬件相关命令仍然由 `runtime/` 负责，和 LLM Agent 保持分离。
