@@ -1,33 +1,35 @@
-# CamBot MVP
+# CamBot Interactive Agent
 
 [English](./README.md) | [简体中文](./README-CN.md)
 
-Minimal runnable single-camera robot filming pipeline inside this repository. The MVP flow is:
+CamBot now uses an interactive LLM agent for filming-plan design. The agent keeps a structured JSON shooting plan internally, shows users a natural-language review, accepts natural-language revision requests, and only treats the plan as final after the user confirms it.
 
-Natural language instruction -> local JSON RAG retrieval -> prompt assembly -> LLM strict JSON plan -> pydantic validation and clipping -> mock execution loop -> printed low-level commands
+Current flow:
 
-This version is intentionally small and safe:
-- No frontend
-- No LangGraph
-- No multi-robot logic
-- No real chassis or lift hardware output
-- Existing RoArm arm code is wrapped, not rewritten
+Natural-language instruction -> local JSON RAG retrieval -> LLM strict JSON plan -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> optional executor run
 
-## Current MVP Scope
+## Current Scope
 
-- Accept one filming instruction
-- Retrieve relevant local templates and rules from `rag/`
-- Build a strict JSON-only prompt
-- Use a Qwen OpenAI-compatible model when configured
-- Fall back to mock JSON output by default
-- Validate with pydantic and clip unsafe parameters
-- Run a mock CamBot executor loop
-- Print and log chassis, lift, and arm commands for inspection
+- Start a planning session from one filming instruction
+- Keep the canonical JSON output schema unchanged
+- Show users a simple summary plus detailed natural-language plan
+- Support iterative natural-language revisions until confirmation
+- Ask a clarification question for broad or vague feedback
+- Save JSON, review text, conversation history, and metadata per session
+- Expose a web-ready Python service layer for future frontend integration
+- Continue to support the existing Qwen/OpenAI-compatible provider and mock fallback
+- Keep low-level robot execution separate and optional
 
 ## Repository Structure
 
 ```text
 app.py
+agent/
+  models.py
+  service.py
+  reviewer.py
+  json_repair.py
+  log_store.py
 config/
   default.yaml
 rag/
@@ -60,28 +62,81 @@ RoArm-M2-S_python/
   ...
 ```
 
-## Reused Existing Code
+## Agent API For Future Web UI
 
-- `RoArm-M2-S_python/roarm_motion_api.py`: existing RoArm serial motion API
-- `runtime/arm_adapter.py`: thin adapter that loads and wraps the existing arm implementation
+The frontend-facing layer is `agent.service.PlanAgentService`. A web backend can call these methods directly:
 
-The MVP does not change the original RoArm control files.
+- `create_session(initial_instruction)`
+- `send_message(session_id, user_message)`
+- `review_plan(session_id)`
+- `confirm_plan(session_id)`
+- `unconfirm_plan(session_id)`
+- `get_current_plan(session_id)`
+- `execute_confirmed_plan(session_id)`
 
-## Dependencies
+`AgentResponse` returns the `session_id`, status, user-facing review text, optional JSON plan, and confirmation flag.
 
-Minimal recommended install:
+## CLI Usage
+
+Mock mode is enabled by default in `config/default.yaml`, so the app can run without live Qwen credentials.
 
 ```bash
-pip install pydantic PyYAML langchain-core langchain-openai pyserial
+python app.py --instruction "Give me a smooth medium follow shot, keep the subject near the center, then stop at the end."
 ```
 
-Notes:
-- `pyserial` is only needed if you later enable the real arm connection.
-- In default mock mode, the app still runs even if live Qwen credentials are not configured.
+If `--instruction` is omitted, the CLI asks for the first filming requirement.
+
+Interactive commands:
+
+```text
+/review     show the current natural-language shooting plan
+/confirm    confirm and save the current plan
+/unconfirm  cancel confirmation and keep editing
+/quit       exit
+```
+
+Any other input is treated as a natural-language revision request, such as:
+
+```text
+Move the subject to the left side and make the shot a little closer.
+```
+
+After `/confirm`, the user may still continue typing revision feedback. The session automatically becomes editable again.
+
+## Optional Execution
+
+By default, confirmation only saves the plan. To run the existing mock executor after confirmation:
+
+```bash
+python app.py --instruction "A stable centered follow shot." --execute-after-confirm
+```
+
+Low-level hardware-facing commands are still handled by `runtime/` and remain separate from the LLM agent.
+
+## Session Logs
+
+Each session is saved under:
+
+```text
+logs/sessions/<session_id>/
+```
+
+Files:
+
+- `plan.json`: latest structured shooting plan
+- `review.md`: latest user-facing natural-language review
+- `conversation.jsonl`: user, assistant, and system messages
+- `metadata.json`: session id, timestamps, confirmation state
+
+The app-level log is still written to:
+
+```text
+logs/cambot.log
+```
 
 ## Qwen API Configuration
 
-Configure Qwen directly in [`config/default.yaml`]. No environment variables are required.
+Configure Qwen directly in `config/default.yaml`. No environment variables are required.
 
 ```yaml
 llm:
@@ -94,29 +149,11 @@ llm:
   use_mock_when_unconfigured: true
 ```
 
-If `api_key` or `base_url` is left empty, the app falls back to the built-in mock planner output by default.
+If `api_key` or `base_url` is left empty, the app falls back to the built-in mock planner output.
 
-## How To Run In Mock Mode
+## Expected JSON Shape
 
-Mock mode is enabled by default in `config/default.yaml`.
-
-Example:
-
-```bash
-python app.py --instruction "Give me a smooth medium follow shot, keep the subject near the center, then stop at the end."
-```
-
-If you omit `--instruction`, the app will prompt for one interactively.
-
-## Example User Instruction
-
-```text
-Give me a smooth medium follow shot, keep the subject near the center, then stop at the end.
-```
-
-## Expected JSON Output
-
-The planner is required to return this shape:
+The planner is still required to return this shape:
 
 ```json
 {
@@ -142,37 +179,23 @@ The planner is required to return this shape:
 }
 ```
 
-## Where Commands Are Printed
+## Dependencies
 
-During execution, low-level hardware-facing commands are not sent to a real receiver. They are printed and logged instead:
+Minimal recommended install:
 
-- chassis commands: `[BASE CMD] ...`
-- lift commands: `[LIFT CMD] ...`
-- arm commands: `[ARM CMD] ...`
-- lost-target placeholder: `[SEARCH] ...`
-
-Logs are written to:
-
-```text
-logs/cambot.log
+```bash
+pip install pydantic PyYAML langchain-core langchain-openai pyserial
 ```
 
-## Replacing Mock Chassis And Lift Later
+Notes:
 
-To replace mock hardware safely:
-
-1. Implement real transport code behind `runtime/base_controller.py`
-2. Implement real lift hardware logic behind `runtime/lift_controller.py`
-3. Keep the existing method interfaces unchanged:
-   - `connect()`
-   - `move(...)` or `move_to(...)`
-   - `move_by(...)`
-   - `stop()`
-   - `close()`
-4. Leave `runtime/cambot_executor.py` unchanged so the control loop still works
+- `pyserial` is only needed if the real arm connection is enabled later.
+- In default mock mode, live Qwen credentials are not required.
 
 ## Notes
 
 - The LLM only plans high-level filming parameters.
+- JSON repair first tries extraction and strict validation, then asks the configured provider to repair the JSON, then falls back to the previous valid plan when available.
+- Natural-language review is rendered from validated JSON so the user-facing description stays aligned with the machine-readable plan.
 - Low-level motion remains rule-based in `runtime/framing_controller.py` and `runtime/safety_controller.py`.
-- The tracker is currently mock-based but has a clean `get_target_state()` interface for future vision integration.
+- Existing RoArm control files remain unchanged.

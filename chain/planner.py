@@ -41,4 +41,4 @@ class Planner:
                 "LangChain planner request failed, using provider fallback: %s",
                 exc,
             )
-            return self.provider.handle_generation_error(exc)
+            return self.provider.handle_generation_error(exc, prompt=prompt)

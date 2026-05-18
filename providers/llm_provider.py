@@ -52,12 +52,12 @@ class LLMProvider:
 
         return ChatOpenAI(**client_kwargs)
 
-    def handle_generation_error(self, exc: Exception) -> str:
+    def handle_generation_error(self, exc: Exception, prompt: str = "") -> str:
         """Return a mock plan when configured, otherwise re-raise the original error."""
         if not self.should_use_mock():
             raise exc
         self.logger.warning("Falling back to mock LLM output after live request failure: %s", exc)
-        return self._mock_response()
+        return self._mock_response(prompt)
 
     def generate(self, prompt: str) -> str:
         """Generate raw planner text using the configured provider or mock mode."""
@@ -67,18 +67,18 @@ class LLMProvider:
             if not self.should_use_mock():
                 raise
             self.logger.warning("Falling back to mock LLM output: %s", exc)
-            return self._mock_response()
+            return self._mock_response(prompt)
 
         try:
             response = model.invoke(prompt)
             return getattr(response, "content", str(response))
         except Exception as exc:
-            return self.handle_generation_error(exc)
+            return self.handle_generation_error(exc, prompt=prompt)
 
     @staticmethod
-    def _mock_response() -> str:
+    def _mock_response(prompt: str = "") -> str:
         """Return a valid deterministic JSON plan for offline development."""
-        payload = {
+        payload = LLMProvider._extract_current_plan(prompt) or {
             "shot_plan": {
                 "template": "mid_follow",
                 "duration_s": 8,
@@ -95,4 +95,96 @@ class LLMProvider:
             },
             "fallback": {"template": "mid_follow_safe"},
         }
+        LLMProvider._apply_mock_feedback(payload, LLMProvider._extract_user_text(prompt))
         return json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _extract_current_plan(prompt: str) -> dict[str, Any] | None:
+        marker = "Current JSON plan:"
+        start = prompt.find(marker)
+        if start < 0:
+            return None
+
+        json_start = prompt.find("{", start + len(marker))
+        if json_start < 0:
+            return None
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(json_start, len(prompt)):
+            char = prompt[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        data = json.loads(prompt[json_start : index + 1])
+                    except json.JSONDecodeError:
+                        return None
+                    return data if isinstance(data, dict) else None
+        return None
+
+    @staticmethod
+    def _apply_mock_feedback(payload: dict[str, Any], prompt: str) -> None:
+        text = prompt.lower()
+        shot_plan = payload.setdefault("shot_plan", {})
+        safety_rules = payload.setdefault("safety_rules", {})
+
+        if any(token in text for token in ["left", "左"]):
+            shot_plan["subject_region"] = "left"
+        elif any(token in text for token in ["right", "右"]):
+            shot_plan["subject_region"] = "right"
+        elif any(token in text for token in ["center", "中央", "中间", "居中"]):
+            shot_plan["subject_region"] = "center"
+
+        if any(token in text for token in ["closer", "close-up", "更近", "靠近", "近一点"]):
+            shot_plan["distance_m"] = 1.4
+            shot_plan["subject_scale_target"] = 0.55
+        elif any(token in text for token in ["farther", "wider", "更远", "远一点", "广一点"]):
+            shot_plan["distance_m"] = 3.0
+            shot_plan["subject_scale_target"] = 0.3
+
+        if any(token in text for token in ["higher", "raise", "抬高", "高一点"]):
+            shot_plan["height_m"] = 1.5
+        elif any(token in text for token in ["lower", "低一点", "降低"]):
+            shot_plan["height_m"] = 0.9
+
+        if any(token in text for token in ["longer", "extend", "延长", "久一点"]):
+            shot_plan["duration_s"] = 12
+        elif any(token in text for token in ["shorter", "quicker", "缩短", "短一点", "快一点"]):
+            shot_plan["duration_s"] = 5
+
+        if any(token in text for token in ["side", "侧", "侧前"]):
+            shot_plan["template"] = "side_front_follow"
+        elif any(token in text for token in ["safe", "稳定", "保守", "安全"]):
+            shot_plan["template"] = "mid_follow_safe"
+
+        if any(token in text for token in ["slow", "慢", "稳一点", "更稳"]):
+            safety_rules["max_speed"] = 0.3
+        elif any(token in text for token in ["fast", "快", "更快"]):
+            safety_rules["max_speed"] = 0.5
+
+    @staticmethod
+    def _extract_user_text(prompt: str) -> str:
+        for marker in ["Latest user feedback:", "User instruction:"]:
+            start = prompt.find(marker)
+            if start >= 0:
+                content_start = start + len(marker)
+                end = prompt.find("Now return", content_start)
+                if end < 0:
+                    end = len(prompt)
+                return prompt[content_start:end]
+        return prompt

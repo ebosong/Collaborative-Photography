@@ -46,3 +46,33 @@ class PromptBuilder:
             f"{user_instruction}\n"
             "Now return one strict JSON object only."
         )
+
+    def build_revision(
+        self,
+        current_plan: dict,
+        user_feedback: str,
+        retrieved_context: dict[str, list[str]],
+    ) -> str:
+        """Construct a JSON-only prompt for revising an existing plan."""
+        context_json = json.dumps(retrieved_context, ensure_ascii=False, indent=2)
+        current_json = json.dumps(current_plan, ensure_ascii=False, indent=2)
+
+        return (
+            "You are revising a high-level filming script for a single-camera robot called CamBot.\n"
+            "Use only the current JSON plan, the latest user feedback, and the retrieved local knowledge.\n"
+            "Preserve the exact schema shape and field names from the current JSON plan.\n"
+            "Apply the user's requested change conservatively and keep all unrelated fields stable.\n"
+            "The LLM is responsible only for high-level semantic planning.\n"
+            "Never output hardware-level motor commands, actuator commands, trajectories, or code.\n"
+            "Return strict JSON only.\n"
+            "Do not return markdown.\n"
+            "Do not return explanatory prose.\n"
+            "Do not return any text before or after the JSON object.\n"
+            "Current JSON plan:\n"
+            f"{current_json}\n"
+            "Retrieved local context:\n"
+            f"{context_json}\n"
+            "Latest user feedback:\n"
+            f"{user_feedback}\n"
+            "Now return the revised strict JSON object only."
+        )

@@ -30,6 +30,18 @@ class PlanValidator:
             self.logger.warning("Schema validation failed, applying safe fallback payload: %s", exc)
             plan = ScriptPlan.model_validate(self._safe_default_payload())
 
+        return self._clip_plan(plan)
+
+    def validate_and_clip_strict(self, plan_text: str) -> ScriptPlan:
+        """Parse and validate without substituting a safe default payload."""
+        payload = json.loads(plan_text)
+        if not isinstance(payload, dict):
+            raise ValueError("Planner output must be a JSON object.")
+        plan = ScriptPlan.model_validate(payload)
+        return self._clip_plan(plan)
+
+    def _clip_plan(self, plan: ScriptPlan) -> ScriptPlan:
+        """Clip a validated plan into configured safe runtime ranges."""
         plan.shot_plan.template = self._validate_template(plan.shot_plan.template)
         plan.shot_plan.duration_s = int(
             self._clip_value("duration_s", plan.shot_plan.duration_s)
