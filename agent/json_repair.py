@@ -27,14 +27,14 @@ class JsonRepairer:
     ) -> ScriptPlan:
         """Return a validated plan, using repair attempts before safe fallback."""
         for candidate in self._candidate_texts(raw_text):
-            plan = self._try_validate(candidate)
+            plan = self._try_validate(candidate, previous_plan=previous_plan)
             if plan is not None:
                 return plan
 
         repaired_text = self._llm_repair(raw_text, previous_plan=previous_plan)
         if repaired_text:
             for candidate in self._candidate_texts(repaired_text):
-                plan = self._try_validate(candidate)
+                plan = self._try_validate(candidate, previous_plan=previous_plan)
                 if plan is not None:
                     return plan
 
@@ -45,11 +45,35 @@ class JsonRepairer:
         self.logger.warning("JSON repair failed without previous plan; using validator fallback.")
         return self.validator.validate_and_clip("{}")
 
-    def _try_validate(self, candidate: str) -> ScriptPlan | None:
+    def _try_validate(
+        self,
+        candidate: str,
+        previous_plan: ScriptPlan | None = None,
+    ) -> ScriptPlan | None:
+        payload = self._load_object(candidate)
+        if payload is None:
+            return None
+
+        payload = self._unwrap_plan_payload(payload)
         try:
-            return self.validator.validate_and_clip_strict(candidate)
+            return self.validator.validate_and_clip_strict(
+                json.dumps(payload, ensure_ascii=False)
+            )
         except Exception as exc:
-            self.logger.warning("Candidate JSON failed validation: %s", exc)
+            if previous_plan is None:
+                self.logger.warning("Candidate JSON failed validation: %s", exc)
+                return None
+
+        merged_payload = self._merge_partial_payload(
+            base=previous_plan.model_dump(),
+            partial=payload,
+        )
+        try:
+            return self.validator.validate_and_clip_strict(
+                json.dumps(merged_payload, ensure_ascii=False)
+            )
+        except Exception as exc:
+            self.logger.warning("Candidate JSON failed validation after merge: %s", exc)
             return None
 
     def _candidate_texts(self, raw_text: str) -> list[str]:
@@ -80,6 +104,73 @@ class JsonRepairer:
         except Exception as exc:
             self.logger.warning("LLM JSON repair request failed: %s", exc)
             return None
+
+    @staticmethod
+    def _load_object(candidate: str) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _unwrap_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        canonical_keys = {"shot_plan", "robot_task", "safety_rules", "fallback"}
+        if canonical_keys.intersection(payload):
+            return payload
+
+        for key in ("plan", "script_plan", "revised_plan", "json"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                return nested
+        return payload
+
+    @classmethod
+    def _merge_partial_payload(
+        cls,
+        base: dict[str, Any],
+        partial: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_partial = cls._normalize_leaf_fields(partial)
+        return cls._deep_merge(base, normalized_partial)
+
+    @staticmethod
+    def _normalize_leaf_fields(payload: dict[str, Any]) -> dict[str, Any]:
+        section_by_field = {
+            "template": "shot_plan",
+            "duration_s": "shot_plan",
+            "distance_m": "shot_plan",
+            "height_m": "shot_plan",
+            "subject_region": "shot_plan",
+            "subject_scale_target": "shot_plan",
+            "name": "robot_task",
+            "max_speed": "safety_rules",
+            "min_distance": "safety_rules",
+            "lost_target_action": "safety_rules",
+        }
+
+        normalized: dict[str, Any] = {}
+        for key, value in payload.items():
+            section = section_by_field.get(key)
+            if section is None:
+                normalized[key] = value
+                continue
+            normalized.setdefault(section, {})[key] = value
+        return normalized
+
+    @classmethod
+    def _deep_merge(
+        cls,
+        base: dict[str, Any],
+        partial: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in partial.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = cls._deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     @staticmethod
     def _extract_first_json_object(text: str) -> str | None:

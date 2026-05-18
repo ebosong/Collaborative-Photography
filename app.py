@@ -60,18 +60,18 @@ def main() -> int:
             if not user_input:
                 continue
 
-            command = user_input.lower()
-            if command in {"/quit", "/exit"}:
+            command = _normalize_command(user_input)
+            if command in {"quit", "exit", "退出"}:
                 print("已退出。")
                 break
-            if command in {"/help", "help"}:
+            if command in {"help", "帮助", "幫助"}:
                 _print_help()
                 continue
-            if command == "/review":
+            if command in {"review", "查看", "预览", "預覽"}:
                 response = service.review_plan(response.session_id)
                 print(response.review)
                 continue
-            if command == "/confirm":
+            if command in {"confirm", "确认", "確認"}:
                 response = service.confirm_plan(response.session_id)
                 logger.info("Confirmed plan: %s", json.dumps(response.plan, ensure_ascii=False))
                 print(response.message)
@@ -83,7 +83,7 @@ def main() -> int:
                     break
                 print("你可以继续输入修改意见来取消确认并更新方案，或输入 /quit 结束。")
                 continue
-            if command == "/unconfirm":
+            if command in {"unconfirm", "取消确认", "取消確認"}:
                 response = service.unconfirm_plan(response.session_id)
                 print(response.message)
                 continue
@@ -113,6 +113,32 @@ def _print_help() -> None:
         "  /quit       退出\n"
         "直接输入自然语言，即可让 Agent 修改当前方案。"
     )
+
+
+def _normalize_command(text: str) -> str:
+    """Normalize CLI commands from ASCII, full-width, and Chinese aliases."""
+    command = text.strip().lower()
+    command = command.replace("／", "/")
+    command = command.lstrip("/").strip()
+    compact = "".join(command.split())
+
+    if compact in {"unconfirm", "取消确认", "取消確認"}:
+        return "unconfirm"
+    if compact in {"confirm", "确认", "確認"}:
+        return "confirm"
+    if compact in {"review", "查看", "预览", "預覽"}:
+        return "review"
+    if compact in {"quit", "exit", "退出"}:
+        return "quit"
+    if compact in {"help", "帮助", "幫助"}:
+        return "help"
+
+    # Some terminals mangle full-width command prefixes but keep the ASCII word.
+    if len(compact) <= 12:
+        for alias in ("unconfirm", "confirm", "review", "quit", "exit", "help"):
+            if alias in compact:
+                return alias
+    return command
 
 
 if __name__ == "__main__":
