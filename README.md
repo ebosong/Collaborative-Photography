@@ -69,10 +69,11 @@ The frontend-facing layer is `agent.service.PlanAgentService`. A web backend can
 - `create_session(initial_instruction)`
 - `send_message(session_id, user_message)`
 - `review_plan(session_id)`
-- `confirm_plan(session_id)`
+- `confirm_plan(session_id)` confirms and executes the final JSON plan
+- `confirm_plan_only(session_id)` confirms and saves without execution
 - `unconfirm_plan(session_id)`
 - `get_current_plan(session_id)`
-- `execute_confirmed_plan(session_id)`
+- `execute_confirmed_plan(session_id)` returns the confirmed plan for lower-level integrations
 
 `AgentResponse` returns the `session_id`, status, user-facing review text, optional JSON plan, and confirmation flag.
 
@@ -111,7 +112,7 @@ For planning-only debugging, disable execution after confirmation:
 python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
 ```
 
-The web-facing service still keeps `confirm_plan()` and `execute_confirmed_plan()` separate, so a future frontend can decide exactly when to dispatch the plan. Low-level hardware-facing commands are still handled by `runtime/`.
+The web-facing `confirm_plan()` has the same meaning as the CLI confirmation command: it confirms the final JSON plan and dispatches it through the existing executor. Low-level hardware-facing commands are still handled by `runtime/`; in the current mock setup they are printed rather than sent to real hardware.
 
 ## Session Logs
 

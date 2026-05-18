@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from agent.json_repair import JsonRepairer
+from agent.service import PlanAgentService
 from app import _normalize_command
 from schemas.script_schema import ScriptPlan
 
@@ -13,6 +15,7 @@ def _config() -> dict:
     return {
         "app": {"mock_mode": True},
         "llm": {"use_mock_when_unconfigured": True},
+        "planner": {"top_k": 2},
         "limits": {
             "duration_s": {"min": 3, "max": 30, "default": 8},
             "distance_m": {"min": 0.8, "max": 4.0, "default": 2.2},
@@ -85,3 +88,58 @@ def test_cli_command_normalization() -> None:
     assert _normalize_command("\uff0fconfirm") == "confirm"
     assert _normalize_command(" confirm ") == "confirm"
     assert _normalize_command("\u786e\u8ba4") == "confirm"
+
+
+def test_confirm_plan_executes_current_plan(tmp_path) -> None:
+    calls: list[ScriptPlan] = []
+
+    class FakeExecutor:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def execute(self, plan: ScriptPlan) -> None:
+            calls.append(plan)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    service = PlanAgentService(
+        _config(),
+        repo_root=repo_root,
+        log_root=tmp_path,
+        executor_factory=FakeExecutor,
+    )
+    response = service.create_session("centered follow shot")
+    response = service.send_message(response.session_id, "move subject left and closer")
+
+    response = service.confirm_plan(response.session_id)
+
+    assert response.status == "executed"
+    assert response.confirmed is True
+    assert len(calls) == 1
+    assert calls[0].shot_plan.subject_region == "left"
+    assert calls[0].shot_plan.distance_m == 1.4
+
+
+def test_confirm_plan_only_does_not_execute(tmp_path) -> None:
+    calls: list[ScriptPlan] = []
+
+    class FakeExecutor:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def execute(self, plan: ScriptPlan) -> None:
+            calls.append(plan)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    service = PlanAgentService(
+        _config(),
+        repo_root=repo_root,
+        log_root=tmp_path,
+        executor_factory=FakeExecutor,
+    )
+    response = service.create_session("centered follow shot")
+
+    response = service.confirm_plan_only(response.session_id)
+
+    assert response.status == "confirmed"
+    assert response.confirmed is True
+    assert calls == []

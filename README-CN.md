@@ -69,10 +69,11 @@ RoArm-M2-S_python/
 - `create_session(initial_instruction)`
 - `send_message(session_id, user_message)`
 - `review_plan(session_id)`
-- `confirm_plan(session_id)`
+- `confirm_plan(session_id)`：确认并按最终 JSON 执行
+- `confirm_plan_only(session_id)`：只确认保存，不执行
 - `unconfirm_plan(session_id)`
 - `get_current_plan(session_id)`
-- `execute_confirmed_plan(session_id)`
+- `execute_confirmed_plan(session_id)`：返回已确认计划，供更底层集成使用
 
 返回的 `AgentResponse` 包含 `session_id`、状态、给使用者看的 review 文本、可选 JSON 方案，以及确认状态。
 
@@ -101,7 +102,7 @@ python app.py --instruction "Give me a smooth medium follow shot, keep the subje
 把主体放到画面左侧，镜头再靠近一点。
 ```
 
-执行 `/confirm` 后，命令行会把确认后的方案下发给现有 CamBot 执行器，执行结束后退出。`agent.service.PlanAgentService` 仍然保留 `confirm_plan()` 和 `execute_confirmed_plan()` 两个独立接口，方便未来网页自行决定何时下发。
+执行 `/confirm` 后，命令行会把确认后的方案下发给现有 CamBot 执行器，执行结束后退出。网页侧调用 `confirm_plan()` 也采用同样语义：确认最终 JSON，并通过现有执行器下发执行。
 
 ## 只保存不执行
 
@@ -111,7 +112,7 @@ python app.py --instruction "Give me a smooth medium follow shot, keep the subje
 python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
 ```
 
-底层硬件相关命令仍然由 `runtime/` 负责，和 LLM Agent 保持分离。
+底层硬件相关命令仍然由 `runtime/` 负责，和 LLM Agent 保持分离。当前 mock 设置下只会打印封装好的下位控制指令，不会真实下发到硬件。
 
 ## 会话日志
 

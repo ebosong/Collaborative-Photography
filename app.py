@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 
 from agent import PlanAgentService
-from runtime.cambot_executor import CamBotExecutor
 from utils.io import load_yaml
 from utils.logger import setup_logging
 
@@ -72,17 +71,16 @@ def main() -> int:
                 print(response.review)
                 continue
             if command == "confirm":
-                response = service.confirm_plan(response.session_id)
+                if args.no_execute_after_confirm:
+                    response = service.confirm_plan_only(response.session_id)
+                else:
+                    response = service.confirm_plan(response.session_id)
                 logger.info("Confirmed plan: %s", json.dumps(response.plan, ensure_ascii=False))
                 print(response.message)
                 if args.no_execute_after_confirm:
                     print(response.review)
                     print("Plan confirmed and saved. Execution is disabled.")
                     continue
-
-                final_plan = service.execute_confirmed_plan(response.session_id)
-                executor = CamBotExecutor(config=config, repo_root=str(repo_root))
-                executor.execute(final_plan)
                 break
             if command == "unconfirm":
                 response = service.unconfirm_plan(response.session_id)

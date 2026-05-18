@@ -26,7 +26,7 @@ class AgentResponse(BaseModel):
     """Web-facing response returned by agent service calls."""
 
     session_id: str
-    status: Literal["draft", "needs_clarification", "confirmed"]
+    status: Literal["draft", "needs_clarification", "confirmed", "executed"]
     message: str
     review: str | None = None
     plan: dict[str, Any] | None = None

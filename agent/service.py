@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent.json_repair import JsonRepairer
 from agent.log_store import SessionLogStore
@@ -15,7 +15,11 @@ from agent.reviewer import PlanReviewer
 from chain.planner import Planner
 from chain.prompt_builder import PromptBuilder
 from chain.retriever import LocalJsonRetriever
+from runtime.cambot_executor import CamBotExecutor
 from schemas.script_schema import ScriptPlan
+
+
+ExecutorFactory = Callable[..., Any]
 
 
 class PlanAgentService:
@@ -42,9 +46,11 @@ class PlanAgentService:
         config: dict[str, Any],
         repo_root: str | Path,
         log_root: str | Path | None = None,
+        executor_factory: ExecutorFactory | None = None,
     ):
         self.config = config
         self.repo_root = Path(repo_root)
+        self.executor_factory = executor_factory
         self.retriever = LocalJsonRetriever(self.repo_root / "rag")
         self.prompt_builder = PromptBuilder()
         self.planner = Planner(config)
@@ -66,10 +72,9 @@ class PlanAgentService:
         )
         session.add_message("user", instruction, kind="initial_instruction")
 
-        retrieved = self._retrieve(instruction)
         prompt = self.prompt_builder.build(
             user_instruction=instruction,
-            retrieved_context=retrieved,
+            retrieved_context=self._retrieve(instruction),
         )
         raw_plan = self.planner.plan(prompt)
         plan = self.repairer.repair_and_validate(raw_plan)
@@ -78,7 +83,7 @@ class PlanAgentService:
 
         self.sessions[session.session_id] = session
         self.log_store.save(session)
-        return self._response(session, "draft", "已生成第一版拍摄方案。", include_plan=True)
+        return self._response(session, "draft", "Generated the first filming plan.", include_plan=True)
 
     def send_message(self, session_id: str, user_message: str) -> AgentResponse:
         """Apply user feedback to the current plan, or ask for clarification."""
@@ -90,7 +95,7 @@ class PlanAgentService:
         session.add_message("user", message, kind="feedback")
         if session.confirmed:
             session.confirmed = False
-            session.add_message("system", "用户继续修改，已取消确认状态。", kind="unconfirm")
+            session.add_message("system", "User resumed editing; confirmation was cleared.", kind="unconfirm")
 
         clarification = self._clarification_question(message)
         if clarification:
@@ -101,11 +106,10 @@ class PlanAgentService:
         if session.current_plan is None:
             return self.create_session(message)
 
-        retrieved = self._retrieve(message)
         prompt = self.prompt_builder.build_revision(
             current_plan=session.current_plan.model_dump(),
             user_feedback=message,
-            retrieved_context=retrieved,
+            retrieved_context=self._retrieve(message),
         )
         raw_plan = self.planner.plan(prompt)
         revised_plan = self.repairer.repair_and_validate(
@@ -115,53 +119,67 @@ class PlanAgentService:
         self._update_plan(session, revised_plan)
         session.add_message("assistant", session.current_review, kind="review")
         self.log_store.save(session)
-        return self._response(session, "draft", "已根据你的反馈更新拍摄方案。", include_plan=True)
+        return self._response(session, "draft", "Updated the filming plan from your feedback.", include_plan=True)
 
     def review_plan(self, session_id: str) -> AgentResponse:
         """Return the current natural-language review."""
         session = self._get_session(session_id)
-        session.add_message("system", "用户查看当前自然语言拍摄方案。", kind="review_request")
+        session.add_message("system", "User reviewed the current filming plan.", kind="review_request")
         self.log_store.save(session)
-        return self._response(session, "confirmed" if session.confirmed else "draft", "当前拍摄方案如下。")
+        status = "confirmed" if session.confirmed else "draft"
+        return self._response(session, status, "Current filming plan.")
 
     def confirm_plan(self, session_id: str) -> AgentResponse:
-        """Mark the current plan as confirmed and persist it."""
-        session = self._get_session(session_id)
-        if session.current_plan is None:
-            raise ValueError("No plan is available to confirm.")
-        session.confirmed = True
-        session.touch()
-        session.add_message("system", "用户已确认当前拍摄方案。", kind="confirm")
+        """Confirm, persist, and execute the current plan."""
+        return self.confirm_and_execute_plan(session_id)
+
+    def confirm_and_execute_plan(self, session_id: str) -> AgentResponse:
+        """Confirm and dispatch the current plan through the existing executor."""
+        session = self._confirm_session(session_id)
+        executor = self._build_executor()
+        executor.execute(session.current_plan)
+        session.add_message("system", "Confirmed plan executed by CamBot executor.", kind="execute")
         self.log_store.save(session)
-        return self._response(session, "confirmed", "已确认当前拍摄方案。", include_plan=True)
+        return self._response(session, "executed", "Plan confirmed and executed.", include_plan=True)
+
+    def confirm_plan_only(self, session_id: str) -> AgentResponse:
+        """Confirm and persist the current plan without execution."""
+        session = self._confirm_session(session_id)
+        return self._response(session, "confirmed", "Plan confirmed and saved.", include_plan=True)
 
     def unconfirm_plan(self, session_id: str) -> AgentResponse:
         """Cancel confirmation so the user can continue editing."""
         session = self._get_session(session_id)
         session.confirmed = False
         session.touch()
-        session.add_message("system", "用户已取消确认，可以继续修改。", kind="unconfirm")
+        session.add_message("system", "User canceled confirmation and can continue editing.", kind="unconfirm")
         self.log_store.save(session)
-        return self._response(session, "draft", "已取消确认，可以继续修改。", include_plan=True)
+        return self._response(session, "draft", "Confirmation canceled; editing can continue.", include_plan=True)
 
     def get_current_plan(self, session_id: str) -> AgentResponse:
         """Return the current structured JSON plan and review."""
         session = self._get_session(session_id)
-        return self._response(
-            session,
-            "confirmed" if session.confirmed else "draft",
-            "当前 JSON 拍摄计划已返回。",
-            include_plan=True,
-        )
+        status = "confirmed" if session.confirmed else "draft"
+        return self._response(session, status, "Current JSON filming plan.", include_plan=True)
 
     def execute_confirmed_plan(self, session_id: str) -> ScriptPlan:
-        """Return a confirmed plan for downstream execution."""
+        """Return a confirmed plan for lower-level integrations."""
         session = self._get_session(session_id)
         if not session.confirmed:
             raise ValueError("Plan must be confirmed before execution.")
         if session.current_plan is None:
             raise ValueError("No plan is available for execution.")
         return session.current_plan
+
+    def _confirm_session(self, session_id: str) -> AgentSession:
+        session = self._get_session(session_id)
+        if session.current_plan is None:
+            raise ValueError("No plan is available to confirm.")
+        session.confirmed = True
+        session.touch()
+        session.add_message("system", "User confirmed the current filming plan.", kind="confirm")
+        self.log_store.save(session)
+        return session
 
     def _retrieve(self, query: str) -> dict[str, list[str]]:
         return self.retriever.retrieve(
@@ -173,6 +191,11 @@ class PlanAgentService:
         session.current_plan = plan
         session.current_review = self.reviewer.render(plan)
         session.touch()
+
+    def _build_executor(self) -> Any:
+        if self.executor_factory is not None:
+            return self.executor_factory(config=self.config, repo_root=str(self.repo_root))
+        return CamBotExecutor(config=self.config, repo_root=str(self.repo_root))
 
     def _response(
         self,
@@ -196,8 +219,8 @@ class PlanAgentService:
     def _clarification_question(self, message: str) -> str | None:
         if any(pattern.search(message) for pattern in self.CLARIFICATION_PATTERNS):
             return (
-                "这个修改方向有点宽泛。你希望主要改哪一部分：镜头运动、构图位置、"
-                "拍摄距离、镜头高度、节奏时长，还是安全约束？"
+                "This revision is broad. Which part should change most: camera movement, "
+                "framing, distance, height, duration, or safety constraints?"
             )
         return None
 
