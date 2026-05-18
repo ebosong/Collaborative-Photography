@@ -77,23 +77,14 @@ class LLMProvider:
 
     @staticmethod
     def _mock_response(prompt: str = "") -> str:
-        """Return a valid deterministic JSON plan for offline development."""
+        """Return a valid deterministic JSON command script for offline development."""
         payload = LLMProvider._extract_current_plan(prompt) or {
-            "shot_plan": {
-                "template": "mid_follow",
-                "duration_s": 8,
-                "distance_m": 2.2,
-                "height_m": 1.2,
-                "subject_region": "center",
-                "subject_scale_target": 0.4,
+            "script": {
+                "title": "Mock centered follow script",
+                "summary": "连接控制器，调整到中景高度，低速稳定跟拍后停止。",
+                "total_duration_s": 6.0,
             },
-            "robot_task": {"name": "track_subject_with_framing"},
-            "safety_rules": {
-                "max_speed": 0.5,
-                "min_distance": 0.8,
-                "lost_target_action": "slow_stop_and_search",
-            },
-            "fallback": {"template": "mid_follow_safe"},
+            "commands": LLMProvider._default_commands(),
         }
         LLMProvider._apply_mock_feedback(payload, LLMProvider._extract_user_text(prompt))
         return json.dumps(payload, ensure_ascii=False)
@@ -140,42 +131,77 @@ class LLMProvider:
     @staticmethod
     def _apply_mock_feedback(payload: dict[str, Any], prompt: str) -> None:
         text = prompt.lower()
-        shot_plan = payload.setdefault("shot_plan", {})
-        safety_rules = payload.setdefault("safety_rules", {})
+        commands = payload.setdefault("commands", LLMProvider._default_commands())
+        script = payload.setdefault("script", {})
 
-        if any(token in text for token in ["left", "左"]):
-            shot_plan["subject_region"] = "left"
-        elif any(token in text for token in ["right", "右"]):
-            shot_plan["subject_region"] = "right"
-        elif any(token in text for token in ["center", "中央", "中间", "居中"]):
-            shot_plan["subject_region"] = "center"
+        move_commands = [
+            command
+            for command in commands
+            if command.get("target") == "base" and command.get("action") == "move"
+        ]
+        lift_commands = [
+            command
+            for command in commands
+            if command.get("target") == "lift" and command.get("action") == "move_to"
+        ]
+        follow_command = move_commands[0] if move_commands else None
+
+        if any(token in text for token in ["left", "左", "左侧", "左边"]):
+            if follow_command is not None:
+                follow_command["angular_z"] = 0.18
+                follow_command["description"] = "底盘向前跟拍并轻微左转，让主体偏向画面左侧。"
+            script["summary"] = "执行偏左构图的稳定跟拍动作。"
+        elif any(token in text for token in ["right", "右", "右侧", "右边"]):
+            if follow_command is not None:
+                follow_command["angular_z"] = -0.18
+                follow_command["description"] = "底盘向前跟拍并轻微右转，让主体偏向画面右侧。"
+            script["summary"] = "执行偏右构图的稳定跟拍动作。"
+        elif any(token in text for token in ["center", "居中", "中间", "中央"]):
+            if follow_command is not None:
+                follow_command["angular_z"] = 0.0
+                follow_command["description"] = "底盘低速向前移动，保持主体居中稳定跟拍。"
+            script["summary"] = "执行居中构图的稳定跟拍动作。"
 
         if any(token in text for token in ["closer", "close-up", "更近", "靠近", "近一点"]):
-            shot_plan["distance_m"] = 1.4
-            shot_plan["subject_scale_target"] = 0.55
+            if follow_command is not None:
+                follow_command["linear_x"] = 0.26
+                follow_command["description"] = (
+                    f"{follow_command.get('description', '底盘跟拍')} 同时略微靠近主体。"
+                )
         elif any(token in text for token in ["farther", "wider", "更远", "远一点", "广一点"]):
-            shot_plan["distance_m"] = 3.0
-            shot_plan["subject_scale_target"] = 0.3
+            if follow_command is not None:
+                follow_command["linear_x"] = 0.10
+                follow_command["description"] = (
+                    f"{follow_command.get('description', '底盘跟拍')} 同时保持更宽距离。"
+                )
 
         if any(token in text for token in ["higher", "raise", "抬高", "高一点"]):
-            shot_plan["height_m"] = 1.5
+            for command in lift_commands:
+                command["height_m"] = 1.5
+                command["description"] = "升降抬高到更高机位。"
         elif any(token in text for token in ["lower", "低一点", "降低"]):
-            shot_plan["height_m"] = 0.9
+            for command in lift_commands:
+                command["height_m"] = 0.9
+                command["description"] = "升降降低到更低机位。"
 
         if any(token in text for token in ["longer", "extend", "延长", "久一点"]):
-            shot_plan["duration_s"] = 12
+            if follow_command is not None:
+                follow_command["duration_s"] = 12.0
         elif any(token in text for token in ["shorter", "quicker", "缩短", "短一点", "快一点"]):
-            shot_plan["duration_s"] = 5
-
-        if any(token in text for token in ["side", "侧", "侧前"]):
-            shot_plan["template"] = "side_front_follow"
-        elif any(token in text for token in ["safe", "稳定", "保守", "安全"]):
-            shot_plan["template"] = "mid_follow_safe"
+            if follow_command is not None:
+                follow_command["duration_s"] = 4.0
 
         if any(token in text for token in ["slow", "慢", "稳一点", "更稳"]):
-            safety_rules["max_speed"] = 0.3
+            if follow_command is not None:
+                follow_command["linear_x"] = min(float(follow_command.get("linear_x", 0.18)), 0.12)
         elif any(token in text for token in ["fast", "快", "更快"]):
-            safety_rules["max_speed"] = 0.5
+            if follow_command is not None:
+                follow_command["linear_x"] = max(float(follow_command.get("linear_x", 0.18)), 0.28)
+
+        script["total_duration_s"] = round(
+            sum(float(command.get("duration_s", 0.0) or 0.0) for command in commands),
+            2,
+        )
 
     @staticmethod
     def _extract_user_text(prompt: str) -> str:
@@ -188,3 +214,76 @@ class LLMProvider:
                     end = len(prompt)
                 return prompt[content_start:end]
         return prompt
+
+    @staticmethod
+    def _default_commands() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "cmd_01",
+                "phase": "准备阶段",
+                "target": "base",
+                "action": "connect",
+                "description": "连接底盘控制器。",
+            },
+            {
+                "id": "cmd_02",
+                "phase": "准备阶段",
+                "target": "lift",
+                "action": "connect",
+                "description": "连接升降控制器。",
+            },
+            {
+                "id": "cmd_03",
+                "phase": "准备阶段",
+                "target": "arm",
+                "action": "connect",
+                "description": "连接机械臂控制器。",
+            },
+            {
+                "id": "cmd_04",
+                "phase": "准备阶段",
+                "target": "arm",
+                "action": "preset",
+                "preset": "ready",
+                "description": "机械臂进入 ready 预置位。",
+            },
+            {
+                "id": "cmd_05",
+                "phase": "起拍动作",
+                "target": "lift",
+                "action": "move_to",
+                "height_m": 1.2,
+                "description": "升降调整到中景跟拍高度。",
+            },
+            {
+                "id": "cmd_06",
+                "phase": "跟拍动作",
+                "target": "base",
+                "action": "move",
+                "linear_x": 0.18,
+                "angular_z": 0.0,
+                "duration_s": 6.0,
+                "description": "底盘低速向前移动，保持主体居中稳定跟拍。",
+            },
+            {
+                "id": "cmd_07",
+                "phase": "结束动作",
+                "target": "base",
+                "action": "stop",
+                "description": "停止底盘运动。",
+            },
+            {
+                "id": "cmd_08",
+                "phase": "结束动作",
+                "target": "lift",
+                "action": "stop",
+                "description": "停止升降运动。",
+            },
+            {
+                "id": "cmd_09",
+                "phase": "结束动作",
+                "target": "arm",
+                "action": "stop",
+                "description": "停止机械臂动作。",
+            },
+        ]

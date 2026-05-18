@@ -55,6 +55,12 @@ class JsonRepairer:
             return None
 
         payload = self._unwrap_plan_payload(payload)
+        if previous_plan is not None and self._is_partial_payload(payload):
+            payload = self._merge_partial_payload(
+                base=previous_plan.model_dump(),
+                partial=payload,
+            )
+
         try:
             return self.validator.validate_and_clip_strict(
                 json.dumps(payload, ensure_ascii=False)
@@ -76,6 +82,10 @@ class JsonRepairer:
             self.logger.warning("Candidate JSON failed validation after merge: %s", exc)
             return None
 
+    @staticmethod
+    def _is_partial_payload(payload: dict[str, Any]) -> bool:
+        return "commands" not in payload
+
     def _candidate_texts(self, raw_text: str) -> list[str]:
         candidates = [raw_text.strip()]
         extracted = self._extract_first_json_object(raw_text)
@@ -94,7 +104,8 @@ class JsonRepairer:
         prompt = (
             "Fix the following text into one strict JSON object for the CamBot plan schema.\n"
             "Return JSON only. Do not add markdown or prose.\n"
-            "Required top-level fields: shot_plan, robot_task, safety_rules, fallback.\n"
+            "Required top-level fields: script and commands.\n"
+            "commands must be an ordered list of executable lower-level control commands.\n"
             f"{current_plan_block}"
             "Original text:\n"
             f"{raw_text}"
@@ -115,7 +126,7 @@ class JsonRepairer:
 
     @staticmethod
     def _unwrap_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        canonical_keys = {"shot_plan", "robot_task", "safety_rules", "fallback"}
+        canonical_keys = {"script", "commands"}
         if canonical_keys.intersection(payload):
             return payload
 
@@ -137,16 +148,9 @@ class JsonRepairer:
     @staticmethod
     def _normalize_leaf_fields(payload: dict[str, Any]) -> dict[str, Any]:
         section_by_field = {
-            "template": "shot_plan",
-            "duration_s": "shot_plan",
-            "distance_m": "shot_plan",
-            "height_m": "shot_plan",
-            "subject_region": "shot_plan",
-            "subject_scale_target": "shot_plan",
-            "name": "robot_task",
-            "max_speed": "safety_rules",
-            "min_distance": "safety_rules",
-            "lost_target_action": "safety_rules",
+            "title": "script",
+            "summary": "script",
+            "total_duration_s": "script",
         }
 
         normalized: dict[str, Any] = {}

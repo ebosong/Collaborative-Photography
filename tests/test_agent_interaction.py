@@ -1,4 +1,4 @@
-﻿"""Regression tests for the interactive planning agent."""
+"""Regression tests for the interactive planning agent."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ def _config() -> dict:
             "subject_scale_target": {"min": 0.2, "max": 0.7, "default": 0.4},
             "allowed_templates": ["mid_follow", "side_front_follow", "mid_follow_safe"],
             "allowed_regions": ["left", "center", "right"],
+            "base": {"max_linear_speed": 0.5, "max_angular_speed": 0.6},
+            "lift": {"max_delta_per_step": 0.05},
         },
         "safety_defaults": {
             "max_speed": 0.5,
@@ -31,27 +33,58 @@ def _config() -> dict:
             "lost_target_action": "slow_stop_and_search",
             "fallback_template": "mid_follow_safe",
         },
+        "arm": {"enabled": False},
     }
 
 
 def _base_plan() -> ScriptPlan:
     return ScriptPlan.model_validate(
         {
-            "shot_plan": {
-                "template": "mid_follow",
-                "duration_s": 8,
-                "distance_m": 2.2,
-                "height_m": 1.2,
-                "subject_region": "center",
-                "subject_scale_target": 0.4,
+            "script": {
+                "title": "Test command script",
+                "summary": "稳定居中跟拍。",
+                "total_duration_s": 6.0,
             },
-            "robot_task": {"name": "track_subject_with_framing"},
-            "safety_rules": {
-                "max_speed": 0.5,
-                "min_distance": 0.8,
-                "lost_target_action": "slow_stop_and_search",
-            },
-            "fallback": {"template": "mid_follow_safe"},
+            "commands": [
+                {
+                    "id": "cmd_01",
+                    "phase": "准备阶段",
+                    "target": "base",
+                    "action": "connect",
+                    "description": "连接底盘控制器。",
+                },
+                {
+                    "id": "cmd_02",
+                    "phase": "跟拍动作",
+                    "target": "base",
+                    "action": "move",
+                    "linear_x": 0.18,
+                    "angular_z": 0.0,
+                    "duration_s": 6.0,
+                    "description": "底盘低速向前移动，保持主体居中稳定跟拍。",
+                },
+                {
+                    "id": "cmd_03",
+                    "phase": "结束动作",
+                    "target": "base",
+                    "action": "stop",
+                    "description": "停止底盘运动。",
+                },
+                {
+                    "id": "cmd_04",
+                    "phase": "结束动作",
+                    "target": "lift",
+                    "action": "stop",
+                    "description": "停止升降运动。",
+                },
+                {
+                    "id": "cmd_05",
+                    "phase": "结束动作",
+                    "target": "arm",
+                    "action": "stop",
+                    "description": "停止机械臂动作。",
+                },
+            ],
         }
     )
 
@@ -61,27 +94,40 @@ def test_partial_json_revision_merges_into_previous_plan() -> None:
     previous = _base_plan()
 
     revised = repairer.repair_and_validate(
-        raw_text=json.dumps({"shot_plan": {"duration_s": 12}}),
+        raw_text=json.dumps({"script": {"summary": "改成更近的跟拍。"}}),
         previous_plan=previous,
     )
 
-    assert revised.shot_plan.duration_s == 12
-    assert revised.shot_plan.distance_m == 2.2
-    assert revised.robot_task.name == "track_subject_with_framing"
+    assert revised.script.summary == "改成更近的跟拍。"
+    assert revised.commands[1].linear_x == 0.18
+    assert revised.commands[-1].target == "arm"
 
 
-def test_leaf_json_revision_merges_into_previous_plan() -> None:
+def test_command_script_values_are_clipped_and_stop_commands_are_added() -> None:
     repairer = JsonRepairer(_config())
-    previous = _base_plan()
 
     revised = repairer.repair_and_validate(
-        raw_text=json.dumps({"duration_s": 12, "subject_region": "left"}),
-        previous_plan=previous,
+        raw_text=json.dumps(
+            {
+                "script": {"title": "Fast shot", "summary": "过快动作。"},
+                "commands": [
+                    {
+                        "phase": "跟拍动作",
+                        "target": "base",
+                        "action": "move",
+                        "linear_x": 9.0,
+                        "angular_z": -9.0,
+                        "duration_s": 60.0,
+                    }
+                ],
+            }
+        ),
     )
 
-    assert revised.shot_plan.duration_s == 12
-    assert revised.shot_plan.subject_region == "left"
-    assert revised.shot_plan.distance_m == 2.2
+    assert revised.commands[0].linear_x == 0.5
+    assert revised.commands[0].angular_z == -0.6
+    assert revised.commands[0].duration_s == 30.0
+    assert [command.target for command in revised.commands[-3:]] == ["base", "lift", "arm"]
 
 
 def test_cli_command_normalization() -> None:
@@ -91,13 +137,13 @@ def test_cli_command_normalization() -> None:
     assert _normalize_command("\u786e\u8ba4") == "confirm"
 
 
-def test_review_includes_concrete_filming_actions() -> None:
+def test_review_includes_command_script_actions() -> None:
     review = PlanReviewer().render(_base_plan())
 
-    assert "\u5177\u4f53\u62cd\u6444\u52a8\u4f5c" in review
-    assert "\u51c6\u5907\u9636\u6bb5" in review
-    assert "\u8ddf\u62cd\u52a8\u4f5c" in review
-    assert "\u7ed3\u675f\u52a8\u4f5c" in review
+    assert "具体拍摄动作规划" in review
+    assert "下位控制指令" in review
+    assert "base.move" in review
+    assert "cmd_02" in review
 
 
 def test_confirm_plan_executes_current_plan(tmp_path) -> None:
@@ -125,8 +171,9 @@ def test_confirm_plan_executes_current_plan(tmp_path) -> None:
     assert response.status == "executed"
     assert response.confirmed is True
     assert len(calls) == 1
-    assert calls[0].shot_plan.subject_region == "left"
-    assert calls[0].shot_plan.distance_m == 1.4
+    move_command = next(command for command in calls[0].commands if command.action == "move")
+    assert move_command.angular_z == 0.18
+    assert move_command.linear_x == 0.26
 
 
 def test_confirm_plan_only_does_not_execute(tmp_path) -> None:

@@ -2,23 +2,24 @@
 
 [English](./README.md) | [简体中文](./README-CN.md)
 
-CamBot now uses an interactive LLM agent for filming-plan design. The agent keeps a structured JSON shooting plan internally, shows users a natural-language review, accepts natural-language revision requests, and only treats the plan as final after the user confirms it.
+CamBot uses an interactive LLM agent for filming-script design. The agent keeps a structured JSON command script internally, shows users a natural-language review, accepts natural-language revision requests, and only treats the script as final after the user confirms it.
 
 Current flow:
 
-Natural-language instruction -> local JSON RAG retrieval -> LLM strict JSON plan -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> executor run
+Natural-language instruction -> local JSON RAG retrieval -> LLM strict executable JSON script -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> command dispatch
 
 ## Current Scope
 
 - Start a planning session from one filming instruction
-- Keep the canonical JSON output schema unchanged
-- Show users a simple summary plus detailed natural-language plan
+- Let the LLM output the complete executable JSON command script
+- Show users a simple summary plus detailed action-by-action filming plan
 - Support iterative natural-language revisions until confirmation
 - Ask a clarification question for broad or vague feedback
 - Save JSON, review text, conversation history, and metadata per session
 - Expose a web-ready Python service layer for future frontend integration
 - Continue to support the existing Qwen/OpenAI-compatible provider and mock fallback
-- Run the executor from the CLI after confirmation while keeping web service confirmation/execution separate
+- Confirm and execute the final JSON script from both CLI and future web calls
+- Print wrapped lower-level control commands instead of sending them to real hardware in the current mock setup
 
 ## Repository Structure
 
@@ -44,9 +45,6 @@ chain/
 schemas/
   script_schema.py
 runtime/
-  tracker.py
-  framing_controller.py
-  safety_controller.py
   cambot_executor.py
   base_controller.py
   lift_controller.py
@@ -69,11 +67,11 @@ The frontend-facing layer is `agent.service.PlanAgentService`. A web backend can
 - `create_session(initial_instruction)`
 - `send_message(session_id, user_message)`
 - `review_plan(session_id)`
-- `confirm_plan(session_id)` confirms and executes the final JSON plan
+- `confirm_plan(session_id)` confirms and executes the final JSON command script
 - `confirm_plan_only(session_id)` confirms and saves without execution
 - `unconfirm_plan(session_id)`
 - `get_current_plan(session_id)`
-- `execute_confirmed_plan(session_id)` returns the confirmed plan for lower-level integrations
+- `execute_confirmed_plan(session_id)` returns the confirmed script for lower-level integrations
 
 `AgentResponse` returns the `session_id`, status, user-facing review text, optional JSON plan, and confirmation flag.
 
@@ -91,7 +89,7 @@ Interactive commands:
 
 ```text
 /review     show the current natural-language shooting plan
-/confirm    confirm, save, and execute the current plan
+/confirm    confirm, save, and execute the current script
 /unconfirm  cancel confirmation and keep editing
 /quit       exit
 ```
@@ -102,7 +100,7 @@ Any other input is treated as a natural-language revision request, such as:
 Move the subject to the left side and make the shot a little closer.
 ```
 
-After `/confirm`, the CLI sends the confirmed plan to the existing CamBot executor and exits when execution finishes.
+After `/confirm`, the CLI sends the confirmed JSON command script to the CamBot executor and exits when execution finishes.
 
 ## Save Without Execution
 
@@ -112,7 +110,7 @@ For planning-only debugging, disable execution after confirmation:
 python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
 ```
 
-The web-facing `confirm_plan()` has the same meaning as the CLI confirmation command: it confirms the final JSON plan and dispatches it through the existing executor. Low-level hardware-facing commands are still handled by `runtime/`; in the current mock setup they are printed rather than sent to real hardware.
+The web-facing `confirm_plan()` has the same meaning as the CLI confirmation command: it confirms the final JSON script and dispatches it through the executor. In the current mock setup, the executor prints the wrapped lower-level commands rather than sending them to real hardware.
 
 ## Session Logs
 
@@ -124,7 +122,7 @@ logs/sessions/<session_id>/
 
 Files:
 
-- `plan.json`: latest structured shooting plan
+- `plan.json`: latest structured command script
 - `review.md`: latest user-facing natural-language review
 - `conversation.jsonl`: user, assistant, and system messages
 - `metadata.json`: session id, timestamps, confirmation state
@@ -154,31 +152,57 @@ If `api_key` or `base_url` is left empty, the app falls back to the built-in moc
 
 ## Expected JSON Shape
 
-The planner is still required to return this shape:
+The planner must return one complete executable command script:
 
 ```json
 {
-  "shot_plan": {
-    "template": "mid_follow",
-    "duration_s": 8,
-    "distance_m": 2.2,
-    "height_m": 1.2,
-    "subject_region": "center",
-    "subject_scale_target": 0.4
+  "script": {
+    "title": "Smooth centered follow shot",
+    "summary": "逐条下发底盘、升降和机械臂控制指令，完成稳定中景跟拍。",
+    "total_duration_s": 8.0
   },
-  "robot_task": {
-    "name": "track_subject_with_framing"
-  },
-  "safety_rules": {
-    "max_speed": 0.5,
-    "min_distance": 0.8,
-    "lost_target_action": "slow_stop_and_search"
-  },
-  "fallback": {
-    "template": "mid_follow_safe"
-  }
+  "commands": [
+    {
+      "id": "cmd_01",
+      "phase": "准备阶段",
+      "target": "base",
+      "action": "connect",
+      "description": "连接底盘控制器。"
+    },
+    {
+      "id": "cmd_02",
+      "phase": "起拍动作",
+      "target": "lift",
+      "action": "move_to",
+      "height_m": 1.2,
+      "description": "升降调整到中景跟拍高度。"
+    },
+    {
+      "id": "cmd_03",
+      "phase": "跟拍动作",
+      "target": "base",
+      "action": "move",
+      "linear_x": 0.18,
+      "angular_z": 0.0,
+      "duration_s": 6.0,
+      "description": "底盘低速向前移动，保持主体稳定跟拍。"
+    },
+    {
+      "id": "cmd_04",
+      "phase": "结束动作",
+      "target": "base",
+      "action": "stop",
+      "description": "停止底盘运动。"
+    }
+  ]
 }
 ```
+
+Supported command targets: `base`, `lift`, `arm`, `wait`.
+
+Supported command actions: `connect`, `move`, `move_to`, `move_by`, `preset`, `stop`, `wait`.
+
+The validator clips unsafe command values and appends missing final stop commands for `base`, `lift`, and `arm`.
 
 ## Dependencies
 
@@ -195,9 +219,8 @@ Notes:
 
 ## Notes
 
-- The LLM only plans high-level filming parameters.
-- The current JSON schema is a single high-level filming plan, not an explicit phased action list. The natural-language review derives concrete filming actions from that JSON so users can understand how the executor will behave.
+- The LLM now plans the full executable command script, not only high-level filming parameters.
+- The natural-language review is rendered directly from validated JSON commands so users see the same action sequence that `/confirm` will dispatch.
 - JSON repair first tries extraction and strict validation, then asks the configured provider to repair the JSON, then falls back to the previous valid plan when available.
-- Natural-language review is rendered from validated JSON so the user-facing description stays aligned with the machine-readable plan.
-- Low-level motion remains rule-based in `runtime/framing_controller.py` and `runtime/safety_controller.py`.
+- `runtime/cambot_executor.py` dispatches the command list through wrapped lower-level controller interfaces.
 - Existing RoArm control files remain unchanged.

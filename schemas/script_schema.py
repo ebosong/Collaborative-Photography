@@ -1,45 +1,42 @@
-"""Pydantic schemas for the minimal CamBot filming plan protocol."""
+"""Pydantic schemas for the CamBot executable command script protocol."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
-class ShotPlan(BaseModel):
-    """High-level filming parameters chosen by the planner."""
-
-    template: str = Field(default="mid_follow_safe")
-    duration_s: int = Field(default=8)
-    distance_m: float = Field(default=2.2)
-    height_m: float = Field(default=1.2)
-    subject_region: str = Field(default="center")
-    subject_scale_target: float = Field(default=0.4)
+CommandTarget = Literal["base", "lift", "arm", "wait"]
+CommandAction = Literal["connect", "move", "move_to", "move_by", "preset", "stop", "wait"]
 
 
-class RobotTask(BaseModel):
-    """Named robot behavior for the executor."""
+class MotionCommand(BaseModel):
+    """One low-level command that can be dispatched to a wrapped controller."""
 
-    name: str = Field(default="track_subject_with_framing")
+    id: str = Field(default="")
+    phase: str = Field(default="拍摄动作")
+    target: CommandTarget
+    action: CommandAction
+    description: str = Field(default="")
+    duration_s: float = Field(default=0.0)
+    linear_x: float | None = None
+    angular_z: float | None = None
+    height_m: float | None = None
+    delta_m: float | None = None
+    preset: str | None = None
 
 
-class SafetyRules(BaseModel):
-    """Planner-provided safety envelope that remains high level."""
+class ScriptMetadata(BaseModel):
+    """Human-readable summary fields for the executable script."""
 
-    max_speed: float = Field(default=0.5)
-    min_distance: float = Field(default=0.8)
-    lost_target_action: str = Field(default="slow_stop_and_search")
-
-
-class FallbackPlan(BaseModel):
-    """Fallback behavior reference when a plan needs substitution."""
-
-    template: str = Field(default="mid_follow_safe")
+    title: str = Field(default="CamBot executable filming script")
+    summary: str = Field(default="逐条执行的拍摄运动控制脚本。")
+    total_duration_s: float = Field(default=8.0)
 
 
 class ScriptPlan(BaseModel):
-    """Canonical structured plan consumed by the CamBot executor."""
+    """Canonical JSON script consumed directly by the CamBot executor."""
 
-    shot_plan: ShotPlan
-    robot_task: RobotTask
-    safety_rules: SafetyRules
-    fallback: FallbackPlan
+    script: ScriptMetadata = Field(default_factory=ScriptMetadata)
+    commands: list[MotionCommand] = Field(default_factory=list)
