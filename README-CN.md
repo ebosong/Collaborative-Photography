@@ -1,25 +1,24 @@
-# CamBot 交互式 Agent
+# CamBot 交互式 Timeline Agent
 
 [English](./README.md) | [简体中文](./README-CN.md)
 
-CamBot 使用交互式 LLM Agent 生成拍摄剧本。Agent 内部维护结构化 JSON 控制指令脚本，给使用者展示自然语言 review，接收自然语言修改意见，并且只有在使用者确认后才把当前脚本视为最终方案。
+CamBot 使用交互式 LLM Agent 生成顶层拍摄剧本。当前协议是 `TimelineScript`：顶层 Agent 只负责输出严格 JSON，包括时间轴动作、视觉检查/跟随配置和打光意图；S3/P4/YOLO/打光车的具体调度由更底层执行系统负责。
 
 当前流程：
 
-自然语言拍摄需求 -> 本地 JSON RAG 检索 -> LLM 生成严格可执行 JSON 剧本 -> JSON 修复与校验 -> 自然语言 review -> 使用者多轮修改 -> 使用者确认 -> 指令分发
+自然语言拍摄需求 -> 本地 JSON RAG 检索 -> LLM 生成严格 `TimelineScript` -> JSON 修复与校验 -> 自然语言 review -> 使用者多轮修改 -> 使用者确认 -> 保存最终 JSON
 
 ## 当前范围
 
 - 根据一条初始拍摄需求创建规划会话
-- 由 LLM 直接输出完整可执行 JSON 控制指令脚本
-- 给使用者展示“简单摘要 + 逐条拍摄动作规划”
+- 由 LLM 输出完整 `TimelineScript`
+- 支持 `base_longitudinal`、`base_rotate`、`lift_delta`、`arm_init_pose`、`arm_move_delta`、`arm_move_xyz`、`wait`
+- 支持 `checkpoint` 和 `follow_mode` 的视觉目标配置
+- 始终输出 `lighting_plan`，没有明确打光要求时使用默认中性正面中光
+- 给使用者展示时间轴动作和打光方案 review
 - 支持自然语言多轮修改，直到使用者确认
-- 对过于宽泛或模糊的反馈主动追问
 - 每个会话保存 JSON、review 文本、对话历史和元信息
-- 提供面向未来网页后端调用的 Python service 层
-- 继续兼容现有 Qwen/OpenAI-compatible provider 和 mock fallback
-- CLI 与未来网页确认后都会执行最终 JSON 脚本
-- 当前 mock 设置下只打印封装好的下位控制指令，不真实下发到硬件
+- CLI 与未来网页确认后保存最终 JSON；顶层 Agent 不直接下发硬件
 
 ## 目录结构
 
@@ -31,33 +30,17 @@ agent/
   reviewer.py
   json_repair.py
   log_store.py
-config/
-  default.yaml
-rag/
-  shot_templates.json
-  skill_rules.json
-  safety_rules.json
 chain/
   retriever.py
   prompt_builder.py
   planner.py
   validator.py
 schemas/
-  script_schema.py
+  timeline_script_schema.py
 runtime/
   cambot_executor.py
-  base_controller.py
-  lift_controller.py
-  arm_adapter.py
 providers/
   llm_provider.py
-utils/
-  logger.py
-  io.py
-logs/
-RoArm-M2-S_python/
-  roarm_motion_api.py
-  ...
 ```
 
 ## 预留给网页的接口
@@ -67,160 +50,134 @@ RoArm-M2-S_python/
 - `create_session(initial_instruction)`
 - `send_message(session_id, user_message)`
 - `review_plan(session_id)`
-- `confirm_plan(session_id)`：确认并执行最终 JSON 控制指令脚本
-- `confirm_plan_only(session_id)`：只确认保存，不执行
+- `confirm_plan(session_id)`：确认并保存最终 `TimelineScript`
+- `confirm_plan_only(session_id)`：只确认保存，不调用确认适配器
 - `unconfirm_plan(session_id)`
 - `get_current_plan(session_id)`
-- `execute_confirmed_plan(session_id)`：返回已确认脚本，供更底层集成使用
-
-返回的 `AgentResponse` 包含 `session_id`、状态、给使用者看的 review 文本、可选 JSON 方案，以及确认状态。
+- `execute_confirmed_plan(session_id)`：返回已确认脚本，供底层集成使用
 
 ## 命令行使用
 
-`config/default.yaml` 默认开启 mock mode，所以不配置真实 Qwen key 也可以运行。
-
 ```bash
-python app.py --instruction "Give me a smooth medium follow shot, keep the subject near the center, then stop at the end."
+python app.py --instruction "先让机器人后退一点，再降低机位，检查人物是否在画面中部，打暖光侧面中光。"
 ```
 
-如果不传 `--instruction`，命令行会先要求输入初始拍摄需求。
+只保存不执行确认适配器：
+
+```bash
+python app.py --instruction "A stable centered shot." --no-execute-after-confirm
+```
 
 交互命令：
 
 ```text
 /review     查看当前自然语言拍摄方案
-/confirm    确认、保存并执行当前脚本
+/confirm    确认并保存当前脚本
 /unconfirm  取消确认，继续修改
 /quit       退出
 ```
 
-除此之外的普通输入都会被当作自然语言修改意见，例如：
+## LLM Provider 配置
 
-```text
-把主体放到画面左侧，镜头再靠近一点。
-```
-
-执行 `/confirm` 后，命令行会把确认后的 JSON 控制指令脚本交给 CamBot 执行器，执行结束后退出。
-
-## 只保存不执行
-
-如果只想调试规划流程，不想在确认后运行执行器：
-
-```bash
-python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
-```
-
-网页侧调用 `confirm_plan()` 与 CLI 的 `/confirm` 语义一致：确认最终 JSON 脚本，并通过执行器分发。当前 mock 设置下，执行器只会打印封装好的下位控制指令，不会真实发送到硬件。
-
-## 会话日志
-
-每个会话会保存到：
-
-```text
-logs/sessions/<session_id>/
-```
-
-文件包括：
-
-- `plan.json`：最新结构化控制指令脚本
-- `review.md`：最新自然语言 review
-- `conversation.jsonl`：使用者、assistant、system 消息
-- `metadata.json`：会话 ID、时间戳、确认状态
-
-应用主日志仍然写入：
-
-```text
-logs/cambot.log
-```
-
-## Qwen API 配置
-
-Qwen 配置仍然直接写在 `config/default.yaml` 中，不要求环境变量。
+`config/default.yaml` 中保留硬编码 provider profile。默认仍是 Qwen；如需切到 DeepSeek，修改 `llm.provider`：
 
 ```yaml
 llm:
-  provider: qwen_openai_compatible
-  api_key: "your_api_key"
-  base_url: "https://your-openai-compatible-endpoint/v1"
-  model: "qwen-plus"
-  temperature: 0.1
-  timeout_s: 30
-  use_mock_when_unconfigured: true
+  provider: deepseek_openai_compatible
+  providers:
+    deepseek_openai_compatible:
+      api_key: "sk-your-deepseek-api-key"
+      base_url: "https://api.deepseek.com"
+      model: "deepseek-v4-flash"
 ```
 
-如果 `api_key` 或 `base_url` 为空，系统默认使用内置 mock planner 输出。
+DeepSeek 使用 OpenAI-compatible 接口，因此和 Qwen 走同一套 `langchain-openai` 调用路径。
 
 ## JSON 输出格式
 
-Planner 需要返回一个完整的可执行控制指令脚本：
+Planner 必须返回一个严格 JSON 对象：
 
 ```json
 {
-  "script": {
-    "title": "Smooth centered follow shot",
-    "summary": "逐条下发底盘、升降和机械臂控制指令，完成稳定中景跟拍。",
-    "total_duration_s": 8.0
-  },
-  "commands": [
+  "name": "back_lower_checkpoint_warm_side_light",
+  "version": "2.0",
+  "mode": "timeline",
+  "summary": "机器人先开环后退，再降低机位，随后检查人物构图，并使用暖光侧面中光。",
+  "timeline": [
     {
-      "id": "cmd_01",
-      "phase": "准备阶段",
-      "target": "base",
-      "action": "connect",
-      "description": "连接底盘控制器。"
+      "id": "b1",
+      "type": "base_longitudinal",
+      "start_at_s": 0.0,
+      "device": "s3",
+      "channel": "base",
+      "params": {
+        "distance_m": -0.2,
+        "speed_m_s": 0.1
+      },
+      "timeout_s": 8,
+      "blocking": true,
+      "on_fail": "stop_all",
+      "description": "小车后退 20 cm。"
     },
     {
-      "id": "cmd_02",
-      "phase": "起拍动作",
-      "target": "lift",
-      "action": "move_to",
-      "height_m": 1.2,
-      "description": "升降调整到中景跟拍高度。"
-    },
+      "id": "cp1",
+      "type": "checkpoint",
+      "start_after": ["b1"],
+      "device": "local",
+      "channel": "vision",
+      "expected_frame": {
+        "enabled": true,
+        "target_class": "person",
+        "target_id": "main_actor",
+        "bbox_format": "cxcywh_norm",
+        "bbox": [0.5, 0.52, 0.35, 0.65],
+        "tolerance": {
+          "center_x": 0.05,
+          "center_y": 0.05,
+          "width": 0.08,
+          "height": 0.1
+        }
+      },
+      "servo": {
+        "max_iters": 8,
+        "allow_base": true,
+        "allow_lift": true,
+        "allow_arm": false
+      },
+      "timeout_s": 30,
+      "blocking": true,
+      "on_vision_fail": "continue",
+      "description": "检查人物是否位于预期画面中部。"
+    }
+  ],
+  "lighting_plan": [
     {
-      "id": "cmd_03",
-      "phase": "跟拍动作",
-      "target": "base",
-      "action": "move",
-      "linear_x": 0.18,
-      "angular_z": 0.0,
-      "duration_s": 6.0,
-      "description": "底盘低速向前移动，保持主体稳定跟拍。"
-    },
-    {
-      "id": "cmd_04",
-      "phase": "结束动作",
-      "target": "base",
-      "action": "stop",
-      "description": "停止底盘运动。"
+      "id": "light1",
+      "start_at_s": 0.0,
+      "color_temperature": "warm",
+      "intensity": "medium",
+      "azimuth": "side",
+      "height": "middle",
+      "description": "暖光、中等强度、侧面中光。"
     }
   ]
 }
 ```
 
-支持的 command target：`base`、`lift`、`arm`、`wait`。
+约束摘要：
 
-支持的 command action：`connect`、`move`、`move_to`、`move_by`、`preset`、`stop`、`wait`。
-
-validator 会裁剪不安全的指令数值，并在缺失时自动补齐 `base`、`lift`、`arm` 的最终停止指令。
+- `version` 固定为 `"2.0"`，`mode` 固定为 `"timeline"`
+- `timeline[].id` 全局唯一
+- `start_after` 引用必须存在
+- 只有 `follow_mode` 可以描述为跟拍/跟随
+- `checkpoint` 只输出期望画面和修正配置，不输出修正动作
+- `lighting_plan` 只输出打光意图，不输出打光车轨迹
+- 顶层 Agent 不输出 `stop` 动作、不输出下位机原生命令、不输出机械臂 `T=100/T=104/T=1041`
 
 ## 依赖
-
-建议最小安装：
 
 ```bash
 pip install pydantic PyYAML langchain-core langchain-openai pyserial
 ```
 
-说明：
-
-- `pyserial` 只有在后续启用真实机械臂连接时才需要。
-- 默认 mock mode 下，不需要真实 Qwen 凭证也能运行。
-
-## 说明
-
-- LLM 现在负责生成完整可执行控制指令脚本，而不只是高层拍摄参数。
-- 自然语言 review 直接从校验后的 JSON commands 渲染，确保使用者看到的动作序列与 `/confirm` 实际分发的一致。
-- JSON 修复会先尝试提取和严格校验，再调用已配置 provider 修复，仍失败时优先保留上一版有效方案。
-- `runtime/cambot_executor.py` 负责按顺序把 commands 分发给封装好的下位控制接口。
-- 原有 RoArm 控制文件保持不变。
+默认 mock mode 下，不需要真实 Qwen 凭证也能运行。

@@ -5,9 +5,17 @@ app:
 
 llm:
   provider: qwen_openai_compatible
-  api_key: ""
-  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  model: qwen3.6-plus
+  providers:
+    qwen_openai_compatible:
+      api_key: "sk-d30cd24a34a346d59a2fd39db6aea773"
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      model: qwen3.6-plus
+      api_key_env: QWEN_API_KEY
+    deepseek_openai_compatible:
+      api_key: "sk-your-deepseek-api-key"
+      base_url: "https://api.deepseek.com"
+      model: deepseek-v4-flash
+      api_key_env: DEEPSEEK_API_KEY
   temperature: 0.1
   timeout_s: 30
   trust_env: false

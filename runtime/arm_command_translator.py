@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from typing import Iterable
 
 
 @dataclass
@@ -29,10 +28,7 @@ class ArmCommandTranslator:
     - Use official RoArm CMD_XYZT_GOAL_CTRL:
       {"T":104,"x":...,"y":...,"z":...,"t":...,"spd":...}
 
-    This means:
-    - no PC-side cubic interpolation by default
-    - no forward_raw_batch required for normal arm movement
-    - P4 only forwards one raw command over UART
+    P4 forwards exactly one raw command over UART for each TimelineScript arm action.
 
     The PC keeps a cached target pose. Delta commands are applied on top of the
     previous target pose.
@@ -41,15 +37,8 @@ class ArmCommandTranslator:
     def __init__(
         self,
         init_pose: ArmPose | None = None,
-        sample_period_s: float = 0.05,
-        min_steps: int = 10,
-        verbose: bool = False,
     ) -> None:
         self.pose = init_pose or ArmPose()
-        # Kept for backward compatibility with old code paths.
-        self.sample_period_s = float(sample_period_s)
-        self.min_steps = int(min_steps)
-        self.verbose = bool(verbose)
 
     # =========================
     # raw command builders
@@ -163,101 +152,6 @@ class ArmCommandTranslator:
         )
 
     # =========================
-    # backward-compatible helpers
-    # =========================
-    def build_pose_command(
-        self,
-        x_mm: float,
-        y_mm: float,
-        z_mm: float,
-        t_rad: float | None = None,
-    ) -> str:
-        """
-        Kept for legacy code. It still builds one T=1041 direct pose command.
-        New script path should use build_goal_ctrl_command(T=104).
-        """
-        if t_rad is None:
-            t_rad = self.pose.t_rad
-
-        return self._json_line(
-            {
-                "T": 1041,
-                "x": round(float(x_mm), 2),
-                "y": round(float(y_mm), 2),
-                "z": round(float(z_mm), 2),
-                "t": round(float(t_rad), 4),
-            }
-        )
-
-    def plan_absolute_move_mm(
-        self,
-        target_x_mm: float,
-        target_y_mm: float,
-        target_z_mm: float,
-        speed_cm_s: float = 5.0,
-        t_rad: float | None = None,
-        update_cached_pose: bool = True,
-    ) -> list[str]:
-        """
-        Backward-compatible wrapper.
-
-        Old behavior returned many T=1041 interpolation points.
-        New behavior returns exactly one official T=104 goal command.
-        """
-        # Map legacy speed_cm_s to a conservative official spd only when this
-        # old method is called directly. Main script_executor uses explicit speed.
-        speed = 0.25
-        return [
-            self.build_goal_ctrl_command(
-                x_mm=target_x_mm,
-                y_mm=target_y_mm,
-                z_mm=target_z_mm,
-                t_rad=t_rad,
-                speed=speed,
-                update_cached_pose=update_cached_pose,
-            )
-        ]
-
-    def plan_delta_move_cm(
-        self,
-        dx_cm: float = 0.0,
-        dy_cm: float = 0.0,
-        dz_cm: float = 0.0,
-        speed_cm_s: float = 5.0,
-        t_rad: float | None = None,
-        update_cached_pose: bool = True,
-    ) -> list[str]:
-        target_x = self.pose.x_mm + float(dx_cm) * 10.0
-        target_y = self.pose.y_mm + float(dy_cm) * 10.0
-        target_z = self.pose.z_mm + float(dz_cm) * 10.0
-        return self.plan_absolute_move_mm(
-            target_x_mm=target_x,
-            target_y_mm=target_y,
-            target_z_mm=target_z,
-            speed_cm_s=speed_cm_s,
-            t_rad=t_rad,
-            update_cached_pose=update_cached_pose,
-        )
-
-    def plan_left_up_front_move_cm(
-        self,
-        left_cm: float = 0.0,
-        up_cm: float = 0.0,
-        front_cm: float = 0.0,
-        speed_cm_s: float = 5.0,
-        t_rad: float | None = None,
-        update_cached_pose: bool = True,
-    ) -> list[str]:
-        return self.plan_delta_move_cm(
-            dx_cm=float(front_cm),
-            dy_cm=float(left_cm),
-            dz_cm=float(up_cm),
-            speed_cm_s=speed_cm_s,
-            t_rad=t_rad,
-            update_cached_pose=update_cached_pose,
-        )
-
-    # =========================
     # cache / feedback helpers
     # =========================
     def set_cached_pose_mm(
@@ -303,15 +197,5 @@ class ArmCommandTranslator:
             "action": "forward_raw",
             "params": {
                 "raw_command": raw_command,
-            },
-        }
-
-    @staticmethod
-    def build_p4_forward_batch_payload(commands: Iterable[str]) -> dict:
-        return {
-            "device": "arm",
-            "action": "forward_raw_batch",
-            "params": {
-                "commands": list(commands),
             },
         }

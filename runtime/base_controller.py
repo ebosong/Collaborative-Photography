@@ -1,4 +1,4 @@
-"""Chassis controller with shared TCP-server transport and compatibility mode."""
+"""Chassis controller with shared TCP-server transport."""
 
 from __future__ import annotations
 
@@ -30,9 +30,9 @@ class BaseController:
     """
     Chassis controller.
 
-    Compatibility behavior for the current ESP32-S3 implementation:
+    Current ESP32-S3 behavior:
     - starts / reuses the shared PC-side TCP server
-    - sends base JSON commands without requiring ACK
+    - sends finite base JSON actions without requiring ACK
     - keeps message format aligned with the ESP team's current protocol
     - falls back to mock print/log behavior if no client is connected yet
     """
@@ -58,13 +58,13 @@ class BaseController:
 
     def move(self, linear_x: float, angular_z: float) -> None:
         """
-        Low-level velocity command kept for backward compatibility.
+        Local diagnostic velocity print.
 
-        The current ESP32-S3 protocol does not define this action, so we keep it mock-only.
+        TimelineScript execution uses move_longitudinal or rotate instead.
         """
         command = f"[BASE CMD] linear_x={linear_x:.3f} angular_z={angular_z:.3f}"
         print(command)
-        self.logger.info("%s (compat mode: velocity command not sent over TCP)", command)
+        self.logger.info("%s (diagnostic only: velocity command not sent over TCP)", command)
 
     def move_longitudinal(self, distance_m: float, speed_m_s: float) -> None:
         command = (

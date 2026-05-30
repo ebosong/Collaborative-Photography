@@ -1,107 +1,139 @@
-"""Natural-language rendering for executable CamBot command scripts."""
+"""Natural-language rendering for CamBot TimelineScript plans."""
 
 from __future__ import annotations
 
-from collections import defaultdict
+from typing import Any
 
-from schemas.script_schema import MotionCommand, ScriptPlan
+from schemas.timeline_script_schema import TimelineActionType, TimelineScript
 
 
 class PlanReviewer:
-    """Render executable JSON scripts into user-facing Chinese text."""
+    """Render TimelineScript JSON into user-facing Chinese text."""
 
-    TARGET_LABELS = {
-        "base": "底盘",
-        "lift": "升降",
-        "arm": "机械臂",
-        "wait": "等待",
+    TYPE_LABELS = {
+        "base_longitudinal": "底盘前后移动",
+        "base_rotate": "底盘原地旋转",
+        "lift_delta": "升降杆相对移动",
+        "arm_init_pose": "机械臂准备位",
+        "arm_move_delta": "机械臂相对移动",
+        "arm_move_xyz": "机械臂绝对移动",
+        "wait": "本地等待",
+        "checkpoint": "画面检查点",
+        "follow_mode": "视觉跟随模式",
     }
 
-    ACTION_LABELS = {
-        "connect": "连接",
-        "move": "移动",
-        "move_to": "移动到指定高度",
-        "move_by": "相对移动",
-        "preset": "预置动作",
-        "stop": "停止",
-        "wait": "等待",
+    LIGHT_COLOR_LABELS = {
+        "warm": "暖光",
+        "cool": "冷光",
+        "neutral": "中性光",
     }
 
-    def render(self, plan: ScriptPlan) -> str:
-        """Return a simple summary plus the ordered filming action script."""
+    LIGHT_INTENSITY_LABELS = {
+        "strong": "强",
+        "medium": "中等",
+        "weak": "弱",
+    }
+
+    LIGHT_AZIMUTH_LABELS = {
+        "front": "正面",
+        "side": "侧面",
+        "back": "背面",
+    }
+
+    LIGHT_HEIGHT_LABELS = {
+        "bottom": "底光",
+        "middle": "中光",
+        "top": "顶光",
+    }
+
+    def render(self, plan: TimelineScript) -> str:
+        """Return a concise review of timeline actions and lighting intent."""
         lines = [
             "## 简单摘要",
-            plan.script.summary,
-            f"预计动作时长：约 {plan.script.total_duration_s:.1f} 秒",
-            f"下位控制指令数：{len(plan.commands)} 条",
+            plan.summary,
+            f"协议版本：{plan.version}；模式：{plan.mode}",
+            f"时间轴动作数：{len(plan.timeline)} 条",
+            f"打光方案数：{len(plan.lighting_plan)} 条",
             "",
-            "## 具体拍摄动作规划",
+            "## 时间轴动作规划",
         ]
 
-        phase_map: dict[str, list[MotionCommand]] = defaultdict(list)
-        for command in plan.commands:
-            phase_map[command.phase].append(command)
+        for action in plan.timeline:
+            lines.append(f"- {action.id}：{action.description}（{self._action_detail(action)}）")
 
-        for phase, commands in phase_map.items():
-            lines.append(f"### {phase}")
-            for command in commands:
-                lines.append(f"- {command.id}：{command.description}（{self._command_detail(command)}）")
+        lines.extend(["", "## 打光计划"])
+        for light in plan.lighting_plan:
+            lines.append(f"- {light.id}：{light.description}（{self._lighting_detail(light)}）")
 
-        lines.extend(
-            [
-                "",
-                "## 下位控制指令",
-                *[f"- {command.id}: {self._machine_command(command)}" for command in plan.commands],
-            ]
-        )
         return "\n".join(lines)
 
-    def _command_detail(self, command: MotionCommand) -> str:
-        target = self.TARGET_LABELS.get(command.target, command.target)
-        action = self.ACTION_LABELS.get(command.action, command.action)
-        details = [target, action]
+    def _action_detail(self, action: Any) -> str:
+        action_type = str(action.type)
+        label = self.TYPE_LABELS.get(action_type, action_type)
+        details = [label]
 
-        if command.action == "move":
-            details.append(f"线速度 {command.linear_x or 0.0:.2f} m/s")
-            details.append(f"角速度 {command.angular_z or 0.0:.2f} rad/s")
-            if command.duration_s:
-                details.append(f"持续 {command.duration_s:.1f} 秒")
-        elif command.action == "move_to" and command.height_m is not None:
-            details.append(f"高度 {command.height_m:.2f} m")
-        elif command.action == "move_by" and command.delta_m is not None:
-            details.append(f"增量 {command.delta_m:.2f} m")
-        elif command.action == "preset" and command.preset:
-            details.append(f"preset={command.preset}")
-        elif command.action == "wait" and command.duration_s:
-            details.append(f"持续 {command.duration_s:.1f} 秒")
+        start_detail = self._start_detail(action)
+        if start_detail:
+            details.append(start_detail)
 
+        if action_type == TimelineActionType.BASE_LONGITUDINAL.value:
+            details.append(f"距离 {action.params.distance_m:.2f} m")
+            details.append(f"速度 {action.params.speed_m_s:.2f} m/s")
+        elif action_type == TimelineActionType.BASE_ROTATE.value:
+            details.append(f"角度 {action.params.angle_deg:.1f} 度")
+            details.append(f"角速度 {action.params.angular_speed_rad_s:.2f} rad/s")
+        elif action_type == TimelineActionType.LIFT_DELTA.value:
+            details.append(f"升降 {action.params.delta_cm:.1f} cm")
+        elif action_type == TimelineActionType.ARM_INIT_POSE.value:
+            details.append(f"等待 {action.params.wait_first_s:.1f} 秒")
+        elif action_type == TimelineActionType.ARM_MOVE_DELTA.value:
+            details.append(
+                f"前后 {action.params.front_cm:.1f} cm，左右 {action.params.left_cm:.1f} cm，上下 {action.params.up_cm:.1f} cm"
+            )
+            details.append(f"腕部变化 {action.params.wrist_delta_deg:.1f} 度")
+            details.append(f"速度 {action.params.speed:.2f}")
+        elif action_type == TimelineActionType.ARM_MOVE_XYZ.value:
+            x_m, y_m, z_m = action.params.target_xyz_m
+            details.append(f"目标 ({x_m:.2f}, {y_m:.2f}, {z_m:.2f}) m")
+            details.append(f"速度 {action.params.speed:.2f}")
+        elif action_type == TimelineActionType.WAIT.value:
+            details.append(f"持续 {action.params.duration_s:.1f} 秒")
+        elif action_type == TimelineActionType.CHECKPOINT.value:
+            bbox = action.expected_frame.bbox
+            details.append(f"目标 {action.expected_frame.target_class}/{action.expected_frame.target_id}")
+            details.append(f"期望框 [{bbox[0]:.2f}, {bbox[1]:.2f}, {bbox[2]:.2f}, {bbox[3]:.2f}]")
+            details.append(f"最多修正 {action.servo.max_iters} 次")
+        elif action_type == TimelineActionType.FOLLOW_MODE.value:
+            bbox = action.target_frame.bbox
+            details.append(f"持续 {action.duration_s:.1f} 秒")
+            details.append(f"目标框 [{bbox[0]:.2f}, {bbox[1]:.2f}, {bbox[2]:.2f}, {bbox[3]:.2f}]")
+            details.append(f"最多反馈 {action.servo.max_iters} 次")
+
+        details.append(f"timeout {action.timeout_s:.1f}s")
+        details.append("阻塞" if action.blocking else "非阻塞")
         return "，".join(details)
 
     @staticmethod
-    def _machine_command(command: MotionCommand) -> str:
-        if command.target == "base" and command.action == "move":
-            return (
-                f"base.move(linear_x={command.linear_x or 0.0:.3f}, "
-                f"angular_z={command.angular_z or 0.0:.3f}, duration_s={command.duration_s:.2f})"
-            )
-        if command.target == "base" and command.action == "connect":
-            return "base.connect()"
-        if command.target == "base" and command.action == "stop":
-            return "base.stop()"
-        if command.target == "lift" and command.action == "connect":
-            return "lift.connect()"
-        if command.target == "lift" and command.action == "move_to":
-            return f"lift.move_to(height_m={command.height_m or 0.0:.3f})"
-        if command.target == "lift" and command.action == "move_by":
-            return f"lift.move_by(delta_m={command.delta_m or 0.0:.3f})"
-        if command.target == "lift" and command.action == "stop":
-            return "lift.stop()"
-        if command.target == "arm" and command.action == "connect":
-            return "arm.connect()"
-        if command.target == "arm" and command.action == "preset":
-            return f"arm.execute_preset(name={command.preset or 'ready'})"
-        if command.target == "arm" and command.action == "stop":
-            return "arm.stop()"
-        if command.target == "wait" or command.action == "wait":
-            return f"wait(duration_s={command.duration_s:.2f})"
-        return f"{command.target}.{command.action}()"
+    def _start_detail(action: Any) -> str:
+        parts: list[str] = []
+        if action.start_at_s is not None:
+            parts.append(f"{action.start_at_s:.1f}s 后可开始")
+        if action.start_after:
+            parts.append("等待 " + ",".join(action.start_after))
+        return "；".join(parts)
+
+    def _lighting_detail(self, light: Any) -> str:
+        parts = []
+        if light.start_at_s is not None:
+            parts.append(f"{light.start_at_s:.1f}s 生效")
+        if light.start_after:
+            parts.append("等待 " + ",".join(light.start_after))
+        parts.extend(
+            [
+                self.LIGHT_COLOR_LABELS.get(str(light.color_temperature), str(light.color_temperature)),
+                self.LIGHT_INTENSITY_LABELS.get(str(light.intensity), str(light.intensity)) + "强度",
+                self.LIGHT_AZIMUTH_LABELS.get(str(light.azimuth), str(light.azimuth)),
+                self.LIGHT_HEIGHT_LABELS.get(str(light.height), str(light.height)),
+            ]
+        )
+        return "，".join(parts)

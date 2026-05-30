@@ -1,4 +1,4 @@
-"""Prompt assembly for strict JSON-only executable open-loop filming scripts."""
+"""Prompt assembly for strict JSON-only TimelineScript filming plans."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 
 class PromptBuilder:
-    """Build the final planner prompt from instruction plus retrieved context."""
+    """Build planner prompts for the Timeline + Checkpoint + Lighting protocol."""
 
     def build(self, user_instruction: str, retrieved_context: dict[str, list[str]]) -> str:
         """Construct a JSON-only planning prompt with explicit output rules."""
@@ -14,47 +14,67 @@ class PromptBuilder:
         canonical_format = self._canonical_format()
 
         return (
-            "You are writing an executable OPEN-LOOP filming command script for a single-camera robot called CamBot.\n"
-            "The current system does NOT have online visual tracking enabled inside this planner yet.\n"
-            "Therefore, ordinary base movement must be treated as finite open-loop motion, not real-time following or tracking.\n"
-            "Do NOT describe ordinary base movement as 跟拍, tracking, following, or keeping the subject centered unless the user explicitly asks for a future follow mode.\n"
+            "You are the top-level CamBot filming Agent. You output one strict JSON TimelineScript.\n"
+            "The lower runtime will parse the TimelineScript and translate it to S3/P4/YOLO/lighting systems.\n"
+            "You must NOT output markdown, prose, comments, native S3/P4 commands, or raw arm commands such as {\"T\":100} or {\"T\":104}.\n"
             "\n"
-            "Current supported mode:\n"
-            "- open_loop_script: a finite ordered list of device actions executed one by one.\n"
+            "Required top-level JSON fields:\n"
+            "- name: english or pinyin identifier without spaces.\n"
+            "- version: exactly \"2.0\".\n"
+            "- mode: exactly \"timeline\".\n"
+            "- summary: short Chinese summary for the user.\n"
+            "- timeline: array of high-level actions.\n"
+            "- lighting_plan: array of lighting intent entries; include a default entry even when the user did not request lighting.\n"
             "\n"
-            "Future modes, NOT enabled in this schema yet:\n"
-            "- follow_mode: YOLO continuously measures subject error and outputs correction actions.\n"
-            "- checkpoint: execution pauses, YOLO checks framing, then correction actions are generated.\n"
-            "Do NOT output follow_mode or checkpoint commands in the current JSON.\n"
-            "If the user asks for follow/tracking/checkpoint behavior, keep the current JSON open-loop and mention the intended idea only in description text.\n"
+            "Supported timeline action types:\n"
+            "- base_longitudinal: S3 base open-loop forward/backward. params: distance_m, speed_m_s.\n"
+            "- base_rotate: S3 base open-loop in-place turn. params: angle_deg, angular_speed_rad_s.\n"
+            "- lift_delta: S3 lift relative move. params: delta_cm.\n"
+            "- arm_init_pose: P4 arm preparation pose. params: wait_first_s.\n"
+            "- arm_move_delta: P4 arm relative move. params: front_cm, left_cm, up_cm, wrist_delta_deg, speed.\n"
+            "- arm_move_xyz: optional P4 absolute target. params: target_xyz_m, target_t_rad, speed. Prefer arm_move_delta unless absolute position is clearly needed.\n"
+            "- wait: local wait. params: duration_s.\n"
+            "- checkpoint: local vision pause/check. Include expected_frame and servo; do not output correction actions.\n"
+            "- follow_mode: local continuous vision follow for duration_s. Include target_frame and servo; do not output each correction action.\n"
             "\n"
-            "The JSON must be a complete ordered script. Each item in commands is one lower-level OPEN-LOOP control command.\n"
-            "Use only these command targets: base, lift, arm, wait.\n"
-            "Use only these command actions: connect, move, move_to, move_by, preset, stop, wait.\n"
+            "Scheduling rules:\n"
+            "- Every timeline item must have a globally unique id.\n"
+            "- Use start_after for ordinary ordered actions and for checkpoint dependencies.\n"
+            "- Use start_at_s only for earliest start time or parallel/staggered actions.\n"
+            "- If both start_at_s and start_after appear, both conditions must be satisfied.\n"
+            "- start_after references must point to existing timeline ids.\n"
             "\n"
-            "Hardware mapping rules:\n"
-            "- base.move is open-loop chassis motion. Use linear_x for straight forward/backward motion.\n"
-            "- Positive linear_x means forward; negative linear_x means backward.\n"
-            "- base.move with angular_z is open-loop in-place rotation.\n"
-            "- Do not set linear_x and angular_z non-zero at the same time.\n"
-            "- For base.move include linear_x, angular_z, and duration_s.\n"
-            "- Prefer lift.move_by over lift.move_to, because the current lift controller is mainly relative-motion based.\n"
-            "- For lift.move_by include delta_m. Positive delta_m means up; negative delta_m means down.\n"
-            "- For lift.move_to include height_m only when the user clearly asks for an absolute height.\n"
-            "- arm currently supports preset=ready for initialization. Do not generate complex arm trajectories unless explicitly requested.\n"
-            "- For arm.preset include preset. Use preset=ready by default.\n"
-            "- wait.wait can be used between actions.\n"
+            "Device/channel rules:\n"
+            "- base_longitudinal/base_rotate: device=s3, channel=base.\n"
+            "- lift_delta: device=s3, channel=lift.\n"
+            "- arm_init_pose/arm_move_delta/arm_move_xyz: device=p4, channel=arm.\n"
+            "- wait: device=local, channel=scheduler.\n"
+            "- checkpoint/follow_mode: device=local, channel=vision.\n"
             "\n"
-            "Safety rules:\n"
-            "- Keep each open-loop movement small and conservative.\n"
-            "- For base.move, prefer duration_s <= 3.0 and |linear_x| <= 0.15 unless the user clearly asks for a larger move.\n"
-            "- For base rotation, prefer duration_s <= 2.0 and |angular_z| <= 0.25.\n"
-            "- For lift.move_by, prefer |delta_m| <= 0.03.\n"
-            "- Always include preparation commands and explicit stop commands for base, lift, and arm at the end.\n"
+            "Vision rules:\n"
+            "- checkpoint pauses future timeline work, checks YOLO framing, and lets the lower visual servo generate corrections.\n"
+            "- checkpoint expected_frame uses bbox_format=\"cxcywh_norm\" and bbox=[cx, cy, w, h].\n"
+            "- Use default target person frame unless the user clearly asks otherwise: bbox [0.5, 0.52, 0.35, 0.65].\n"
+            "- checkpoint servo default: max_iters=8, allow_base=true, allow_lift=true, allow_arm=false.\n"
+            "- follow_mode is the only action that may be described as 跟拍 or 跟随.\n"
+            "- Ordinary base_longitudinal/base_rotate actions are finite open-loop movement; do not call them real-time tracking/following.\n"
             "\n"
-            "Use phase and description so a non-technical user can understand each filming action.\n"
-            "Return strict JSON only. Do not return markdown, prose, comments, or text outside the JSON object.\n"
-            "Use this exact schema shape and field names:\n"
+            "Lighting rules:\n"
+            "- lighting_plan only states lighting intent, not lighting-car paths, UWB control, orbit radius, or concrete motion trajectories.\n"
+            "- color_temperature enum: warm, cool, neutral.\n"
+            "- intensity enum: strong, medium, weak.\n"
+            "- azimuth enum: front, side, back.\n"
+            "- height enum: bottom, middle, top.\n"
+            "- If unspecified, output: neutral, medium, front, middle, id=light_default, start_at_s=0.0.\n"
+            "\n"
+            "Safety and output constraints:\n"
+            "- Do not output stop actions. Stopping is handled by the PC scheduler and ACK logic.\n"
+            "- Do not output low-level command wrappers such as device/action/cmd_id payloads.\n"
+            "- Keep movements conservative: distance_m -0.5..0.5, speed_m_s 0.03..0.20, angle_deg -45..45, angular_speed_rad_s 0.05..0.35, lift delta -10..10 cm.\n"
+            "- Prefer small steps: lift delta usually -3..3 cm; arm deltas usually -5..5 cm; wrist_delta_deg -20..20; arm speed 0.10..0.35.\n"
+            "- Include timeout_s, blocking, on_fail or on_vision_fail, and a Chinese description for each timeline item.\n"
+            "\n"
+            "Use this schema shape and field names:\n"
             f"{json.dumps(canonical_format, ensure_ascii=False, indent=2)}\n"
             "Retrieved local context:\n"
             f"{context_json}\n"
@@ -69,28 +89,18 @@ class PromptBuilder:
         user_feedback: str,
         retrieved_context: dict[str, list[str]],
     ) -> str:
-        """Construct a JSON-only prompt for revising an existing command script."""
+        """Construct a JSON-only prompt for revising an existing TimelineScript."""
         context_json = json.dumps(retrieved_context, ensure_ascii=False, indent=2)
         current_json = json.dumps(current_plan, ensure_ascii=False, indent=2)
 
         return (
-            "You are revising an executable OPEN-LOOP filming command script for CamBot.\n"
-            "The current planner is only allowed to output finite open-loop device actions.\n"
-            "Do NOT turn ordinary chassis movement into real-time following/tracking unless the user explicitly asks for future follow mode.\n"
-            "The output must remain a complete ordered command script, not a partial patch.\n"
-            "\n"
-            "Use only these command targets: base, lift, arm, wait.\n"
-            "Use only these command actions: connect, move, move_to, move_by, preset, stop, wait.\n"
-            "\n"
-            "Hardware rules:\n"
-            "- base.move is open-loop. Use linear_x for straight motion, angular_z for in-place rotation.\n"
-            "- Do not set linear_x and angular_z non-zero at the same time.\n"
-            "- Prefer lift.move_by over lift.move_to.\n"
-            "- arm currently supports preset=ready for initialization.\n"
-            "- Keep movements conservative: base duration_s usually <= 3.0, |linear_x| usually <= 0.15, |lift.delta_m| usually <= 0.03.\n"
-            "- Keep unrelated commands stable when applying user feedback.\n"
-            "- Always keep explicit stop commands for base, lift, and arm at the end.\n"
-            "\n"
+            "You are revising a CamBot TimelineScript. Return the complete revised strict JSON object, not a patch.\n"
+            "Keep version exactly \"2.0\" and mode exactly \"timeline\".\n"
+            "Keep unrelated timeline actions and lighting entries stable while applying the latest feedback.\n"
+            "Do not output stop actions, low-level device/action/cmd_id payloads, or raw arm commands such as {\"T\":100} or {\"T\":104}.\n"
+            "Only follow_mode may be described as 跟拍 or 跟随; ordinary base actions remain finite open-loop movement.\n"
+            "lighting_plan must always be present and must use only warm/cool/neutral, strong/medium/weak, front/side/back, bottom/middle/top.\n"
+            "Every timeline id must be unique, and every start_after reference must exist.\n"
             "Return strict JSON only. Do not return markdown, prose, comments, or text outside the JSON object.\n"
             "Current JSON plan:\n"
             f"{current_json}\n"
@@ -104,87 +114,80 @@ class PromptBuilder:
     @staticmethod
     def _canonical_format() -> dict:
         return {
-            "script": {
-                "title": "Open-loop camera motion script",
-                "summary": "按顺序执行机械臂、升降杆和底盘的开环动作组合，用于测试拍摄机位变化。",
-                "total_duration_s": 5.5,
-            },
-            "commands": [
+            "name": "back_lower_checkpoint_warm_side_light",
+            "version": "2.0",
+            "mode": "timeline",
+            "summary": "机器人先开环后退，再降低机位，随后检查人物构图，并使用暖光侧面中光。",
+            "timeline": [
                 {
-                    "id": "cmd_01",
-                    "phase": "准备阶段",
-                    "target": "base",
-                    "action": "connect",
-                    "description": "连接底盘控制器。",
+                    "id": "b1",
+                    "type": "base_longitudinal",
+                    "start_at_s": 0.0,
+                    "device": "s3",
+                    "channel": "base",
+                    "params": {
+                        "distance_m": -0.2,
+                        "speed_m_s": 0.1,
+                    },
+                    "timeout_s": 8,
+                    "blocking": True,
+                    "on_fail": "stop_all",
+                    "description": "小车后退 20 cm。",
                 },
                 {
-                    "id": "cmd_02",
-                    "phase": "准备阶段",
-                    "target": "lift",
-                    "action": "connect",
-                    "description": "连接升降杆控制器。",
+                    "id": "l1",
+                    "type": "lift_delta",
+                    "start_after": ["b1"],
+                    "device": "s3",
+                    "channel": "lift",
+                    "params": {
+                        "delta_cm": -2.0,
+                    },
+                    "timeout_s": 8,
+                    "blocking": True,
+                    "on_fail": "stop_all",
+                    "description": "升降杆下降 2 cm。",
                 },
                 {
-                    "id": "cmd_03",
-                    "phase": "准备阶段",
-                    "target": "arm",
-                    "action": "connect",
-                    "description": "连接机械臂控制器。",
+                    "id": "cp1",
+                    "type": "checkpoint",
+                    "start_after": ["l1"],
+                    "device": "local",
+                    "channel": "vision",
+                    "expected_frame": {
+                        "enabled": True,
+                        "target_class": "person",
+                        "target_id": "main_actor",
+                        "bbox_format": "cxcywh_norm",
+                        "bbox": [0.5, 0.52, 0.35, 0.65],
+                        "tolerance": {
+                            "center_x": 0.05,
+                            "center_y": 0.05,
+                            "width": 0.08,
+                            "height": 0.10,
+                        },
+                    },
+                    "servo": {
+                        "max_iters": 8,
+                        "allow_base": True,
+                        "allow_lift": True,
+                        "allow_arm": False,
+                    },
+                    "timeout_s": 30,
+                    "blocking": True,
+                    "on_vision_fail": "continue",
+                    "description": "检查人物是否位于预期画面中部。",
                 },
+            ],
+            "lighting_plan": [
                 {
-                    "id": "cmd_04",
-                    "phase": "准备阶段",
-                    "target": "arm",
-                    "action": "preset",
-                    "preset": "ready",
-                    "description": "机械臂回到准备位。",
-                },
-                {
-                    "id": "cmd_05",
-                    "phase": "机位调整",
-                    "target": "lift",
-                    "action": "move_by",
-                    "delta_m": -0.02,
-                    "description": "升降杆下降 2 cm，形成较低机位。",
-                },
-                {
-                    "id": "cmd_06",
-                    "phase": "机位调整",
-                    "target": "base",
-                    "action": "move",
-                    "linear_x": -0.10,
-                    "angular_z": 0.0,
-                    "duration_s": 2.0,
-                    "description": "底盘开环后退一小段距离。",
-                },
-                {
-                    "id": "cmd_07",
-                    "phase": "停顿",
-                    "target": "wait",
-                    "action": "wait",
-                    "duration_s": 0.5,
-                    "description": "等待设备稳定。",
-                },
-                {
-                    "id": "cmd_08",
-                    "phase": "结束动作",
-                    "target": "base",
-                    "action": "stop",
-                    "description": "停止底盘运动。",
-                },
-                {
-                    "id": "cmd_09",
-                    "phase": "结束动作",
-                    "target": "lift",
-                    "action": "stop",
-                    "description": "停止升降杆运动。",
-                },
-                {
-                    "id": "cmd_10",
-                    "phase": "结束动作",
-                    "target": "arm",
-                    "action": "stop",
-                    "description": "停止机械臂动作。",
-                },
+                    "id": "light1",
+                    "start_at_s": 0.0,
+                    "color_temperature": "warm",
+                    "intensity": "medium",
+                    "azimuth": "side",
+                    "height": "middle",
+                    "description": "暖光、中等强度、侧面中光。",
+                }
             ],
         }

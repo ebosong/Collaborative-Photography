@@ -1,216 +1,183 @@
-"""Plan parsing, validation, clipping, and fallback substitution.
-
-This validator keeps the current script + commands format, but clips values into
-ranges that match the current S3/P4 compatibility executor.
-"""
+"""TimelineScript parsing, validation, normalization, and safety clipping."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import ValidationError
 
-from schemas.script_schema import MotionCommand, ScriptPlan
+from schemas.timeline_script_schema import (
+    ArmMoveDeltaAction,
+    ArmMoveXYZAction,
+    BaseLongitudinalAction,
+    BaseRotateAction,
+    CheckpointAction,
+    FollowModeAction,
+    LiftDeltaAction,
+    LightingPlanEntry,
+    TimelineActionType,
+    TimelineScript,
+    WaitAction,
+    default_lighting_plan,
+)
 
 
 class PlanValidator:
-    """Validate LLM command scripts and clip values into safe runtime ranges."""
+    """Validate LLM TimelineScript output and clip values into conservative ranges."""
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def validate_and_clip(self, plan_text: str) -> ScriptPlan:
+    def validate_and_clip(self, plan_text: str) -> TimelineScript:
         """Parse raw text, validate against schema, and clip unsafe values."""
         payload = self._parse_json(plan_text)
+        payload = self._normalize_payload(payload)
 
         try:
-            plan = ScriptPlan.model_validate(payload)
+            plan = TimelineScript.model_validate(payload)
         except ValidationError as exc:
-            self.logger.warning("Schema validation failed, applying safe fallback payload: %s", exc)
-            plan = ScriptPlan.model_validate(self._safe_default_payload())
+            self.logger.warning("TimelineScript validation failed, using safe fallback payload: %s", exc)
+            plan = TimelineScript.model_validate(self._safe_default_payload())
+        except ValueError as exc:
+            self.logger.warning("TimelineScript validation failed, using safe fallback payload: %s", exc)
+            plan = TimelineScript.model_validate(self._safe_default_payload())
 
         return self._clip_plan(plan)
 
-    def validate_and_clip_strict(self, plan_text: str) -> ScriptPlan:
+    def validate_and_clip_strict(self, plan_text: str) -> TimelineScript:
         """Parse and validate without substituting a safe default payload."""
         payload = json.loads(plan_text)
         if not isinstance(payload, dict):
             raise ValueError("Planner output must be a JSON object.")
-        plan = ScriptPlan.model_validate(payload)
+        plan = TimelineScript.model_validate(self._normalize_payload(payload))
         return self._clip_plan(plan)
 
-    def _clip_plan(self, plan: ScriptPlan) -> ScriptPlan:
-        """Clip a validated command script into configured safe runtime ranges."""
-        commands = [self._clip_command(index, command) for index, command in enumerate(plan.commands, start=1)]
-        if not commands:
-            commands = [
-                MotionCommand(
-                    id="cmd_01",
-                    phase="安全兜底",
-                    target="base",
-                    action="stop",
-                    description="未生成有效动作时停止底盘。",
-                )
-            ]
+    def _clip_plan(self, plan: TimelineScript) -> TimelineScript:
+        """Clip a validated timeline script into protocol and safety ranges."""
+        plan.name = self._normalize_name(plan.name)
+        plan.version = "2.0"
+        plan.mode = "timeline"
+        if not plan.summary.strip():
+            plan.summary = "按时间轴执行拍摄动作，并提供画面检查和打光方案。"
 
-        commands = self._ensure_stop_commands(commands)
-        plan.commands = self._renumber_commands(commands)
-        plan.script.total_duration_s = self._total_duration(plan.commands)
-        if not plan.script.title:
-            plan.script.title = "CamBot executable filming script"
-        if not plan.script.summary:
-            plan.script.summary = "逐条执行的拍摄运动控制脚本。"
-        return plan
+        if not plan.timeline:
+            plan.timeline = TimelineScript.model_validate(self._safe_default_payload()).timeline
 
-    def _clip_command(self, index: int, command: MotionCommand) -> MotionCommand:
-        command.id = command.id or f"cmd_{index:02d}"
-        command.phase = command.phase or "拍摄动作"
-        command = self._normalize_target_action(command)
-        command.description = command.description or self._default_description(command)
-        command.duration_s = self._clip_duration(command.duration_s)
+        plan.timeline = [self._clip_action(action) for action in plan.timeline]
+        plan.lighting_plan = plan.lighting_plan or [
+            LightingPlanEntry.model_validate(item) for item in default_lighting_plan()
+        ]
+        plan.lighting_plan = [self._clip_lighting_entry(entry) for entry in plan.lighting_plan]
 
-        if command.target == "base":
-            if command.action == "move":
-                command.linear_x = self._clip_optional(
-                    command.linear_x,
-                    self._limit("base", "max_linear_speed", 0.30),
-                    default=0.0,
-                )
-                command.angular_z = self._clip_optional(
-                    command.angular_z,
-                    self._limit("base", "max_angular_speed", 0.50),
-                    default=0.0,
-                )
-                command = self._force_base_move_to_single_axis(command)
-            elif command.action == "stop":
-                command.linear_x = None
-                command.angular_z = None
-                command.duration_s = 0.0
+        return TimelineScript.model_validate(plan.model_dump())
 
-        if command.target == "lift":
-            height_limits = self.config.get("limits", {}).get("height_m", {})
-            if command.action == "move_to":
-                command.height_m = self._clip_range(
-                    command.height_m,
-                    minimum=float(height_limits.get("min", 0.6)),
-                    maximum=float(height_limits.get("max", 1.8)),
-                    default=float(height_limits.get("default", 1.0)),
-                )
-            elif command.action == "move_by":
-                command.delta_m = self._clip_optional(
-                    command.delta_m,
-                    self._limit("lift", "max_delta_per_step", 0.05),
-                    default=0.0,
-                )
-            elif command.action == "stop":
-                command.height_m = None
-                command.delta_m = None
-                command.duration_s = 0.0
+    def _clip_action(self, action: Any) -> Any:
+        action.description = self._sanitize_action_description(action.type, action.description)
+        action.timeout_s = self._clip_range(float(action.timeout_s), 0.1, 120.0)
 
-        if command.target == "arm":
-            if command.action == "preset":
-                preset = (command.preset or "ready").strip().lower()
-                if preset not in {"ready", "home", "init", "initial", "reset"}:
-                    self.logger.warning("Unsupported arm preset '%s'; rewriting to ready.", preset)
-                    preset = "ready"
-                command.preset = preset
-            if command.action == "stop":
-                command.preset = None
-                command.duration_s = 0.0
+        if isinstance(action, BaseLongitudinalAction):
+            action.params.distance_m = self._clip_range(action.params.distance_m, -0.5, 0.5)
+            action.params.speed_m_s = self._clip_range(abs(action.params.speed_m_s), 0.03, 0.20)
+            action.device = "s3"
+            action.channel = "base"
+            action.blocking = bool(action.blocking)
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
 
-        if command.target == "wait":
-            command.action = "wait"
-            command.linear_x = None
-            command.angular_z = None
-            command.height_m = None
-            command.delta_m = None
-            command.preset = None
-
-        return command
-
-    @staticmethod
-    def _force_base_move_to_single_axis(command: MotionCommand) -> MotionCommand:
-        """Current S3 compatibility layer supports straight or in-place rotate first."""
-        linear_x = float(command.linear_x or 0.0)
-        angular_z = float(command.angular_z or 0.0)
-
-        if abs(linear_x) > 1e-6 and abs(angular_z) > 1e-6:
-            if abs(linear_x) >= abs(angular_z):
-                command.angular_z = 0.0
-                command.description = (
-                    command.description + "（已按硬件兼容规则转换为直线运动。）"
-                )
-            else:
-                command.linear_x = 0.0
-                command.description = (
-                    command.description + "（已按硬件兼容规则转换为原地旋转。）"
-                )
-        return command
-
-    @staticmethod
-    def _normalize_target_action(command: MotionCommand) -> MotionCommand:
-        allowed_actions = {
-            "base": {"connect", "move", "stop"},
-            "lift": {"connect", "move_to", "move_by", "stop"},
-            "arm": {"connect", "preset", "stop"},
-            "wait": {"wait"},
-        }
-        if command.action in allowed_actions[command.target]:
-            return command
-
-        command.phase = command.phase or "安全兜底"
-        command.description = (
-            command.description
-            or f"无效指令 {command.target}.{command.action} 已转换为等待占位。"
-        )
-        command.target = "wait"
-        command.action = "wait"
-        command.duration_s = max(0.0, command.duration_s)
-        command.linear_x = None
-        command.angular_z = None
-        command.height_m = None
-        command.delta_m = None
-        command.preset = None
-        return command
-
-    def _ensure_stop_commands(self, commands: list[MotionCommand]) -> list[MotionCommand]:
-        stopped_targets = {
-            command.target
-            for command in commands
-            if command.target in {"base", "lift", "arm"} and command.action == "stop"
-        }
-        next_index = len(commands) + 1
-        for target, description in [
-            ("base", "拍摄结束后停止底盘。"),
-            ("lift", "拍摄结束后停止升降。"),
-            ("arm", "拍摄结束后停止机械臂。"),
-        ]:
-            if target in stopped_targets:
-                continue
-            commands.append(
-                MotionCommand(
-                    id=f"cmd_{next_index:02d}",
-                    phase="结束动作",
-                    target=target,  # type: ignore[arg-type]
-                    action="stop",
-                    description=description,
-                )
+        elif isinstance(action, BaseRotateAction):
+            action.params.angle_deg = self._clip_range(action.params.angle_deg, -45.0, 45.0)
+            action.params.angular_speed_rad_s = self._clip_range(
+                abs(action.params.angular_speed_rad_s), 0.05, 0.35
             )
-            next_index += 1
-        return commands
+            action.device = "s3"
+            action.channel = "base"
+            action.blocking = bool(action.blocking)
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
+
+        elif isinstance(action, LiftDeltaAction):
+            action.params.delta_cm = self._clip_range(action.params.delta_cm, -10.0, 10.0)
+            action.device = "s3"
+            action.channel = "lift"
+            action.blocking = bool(action.blocking)
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
+
+        elif isinstance(action, ArmMoveDeltaAction):
+            action.params.front_cm = self._clip_range(action.params.front_cm, -5.0, 5.0)
+            action.params.left_cm = self._clip_range(action.params.left_cm, -5.0, 5.0)
+            action.params.up_cm = self._clip_range(action.params.up_cm, -5.0, 5.0)
+            action.params.wrist_delta_deg = self._clip_range(action.params.wrist_delta_deg, -20.0, 20.0)
+            action.params.speed = self._clip_range(action.params.speed, 0.10, 0.35)
+            action.device = "p4"
+            action.channel = "arm"
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
+
+        elif isinstance(action, ArmMoveXYZAction):
+            action.params.target_xyz_m = tuple(
+                self._clip_range(float(value), -1.0, 1.0) for value in action.params.target_xyz_m
+            )
+            action.params.speed = self._clip_range(action.params.speed, 0.10, 0.35)
+            action.device = "p4"
+            action.channel = "arm"
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
+
+        elif action.type == TimelineActionType.ARM_INIT_POSE:
+            action.params.wait_first_s = self._clip_range(action.params.wait_first_s, 0.0, 10.0)
+            action.device = "p4"
+            action.channel = "arm"
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 30.0)
+
+        elif isinstance(action, WaitAction):
+            action.params.duration_s = self._clip_range(action.params.duration_s, 0.0, 60.0)
+            action.device = "local"
+            action.channel = "scheduler"
+            action.timeout_s = max(0.1, min(action.timeout_s, action.params.duration_s + 5.0))
+
+        elif isinstance(action, CheckpointAction):
+            action.device = "local"
+            action.channel = "vision"
+            action.timeout_s = self._clip_range(action.timeout_s, 1.0, 120.0)
+            action.expected_frame.bbox = self._clip_bbox(action.expected_frame.bbox)
+            action.expected_frame.target_class = action.expected_frame.target_class or "person"
+            action.expected_frame.target_id = action.expected_frame.target_id or "main_actor"
+            action.servo.max_iters = int(self._clip_range(float(action.servo.max_iters), 1.0, 30.0))
+
+        elif isinstance(action, FollowModeAction):
+            action.device = "local"
+            action.channel = "vision"
+            action.duration_s = self._clip_range(action.duration_s, 0.5, 60.0)
+            action.timeout_s = self._clip_range(action.timeout_s, action.duration_s, action.duration_s + 30.0)
+            action.target_frame.bbox = self._clip_bbox(action.target_frame.bbox)
+            action.target_frame.target_class = action.target_frame.target_class or "person"
+            action.target_frame.target_id = action.target_frame.target_id or "main_actor"
+            action.servo.max_iters = int(self._clip_range(float(action.servo.max_iters), 1.0, 300.0))
+
+        return action
 
     @staticmethod
-    def _renumber_commands(commands: list[MotionCommand]) -> list[MotionCommand]:
-        for index, command in enumerate(commands, start=1):
-            command.id = f"cmd_{index:02d}"
-        return commands
+    def _clip_lighting_entry(entry: LightingPlanEntry) -> LightingPlanEntry:
+        if entry.start_at_s is not None:
+            entry.start_at_s = max(0.0, float(entry.start_at_s))
+        if not entry.description.strip():
+            entry.description = "默认中性光、中等强度、正面中光。"
+        return entry
 
-    @staticmethod
-    def _total_duration(commands: list[MotionCommand]) -> float:
-        return round(sum(max(0.0, float(command.duration_s)) for command in commands), 2)
+    @classmethod
+    def _normalize_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Fill missing TimelineScript defaults before schema validation."""
+        normalized = dict(payload)
+
+        normalized.setdefault("name", cls._normalize_name(str(normalized.get("title") or "timeline_script")))
+        normalized.setdefault("version", "2.0")
+        normalized.setdefault("mode", "timeline")
+
+        normalized.setdefault("summary", "按时间轴执行拍摄动作，并提供画面检查和打光方案。")
+
+        normalized.setdefault("timeline", [])
+        normalized.setdefault("lighting_plan", default_lighting_plan())
+        return normalized
 
     def _parse_json(self, plan_text: str) -> dict[str, Any]:
         try:
@@ -224,108 +191,66 @@ class PlanValidator:
             return self._safe_default_payload()
         return payload
 
-    def _limit(self, section: str, key: str, default: float) -> float:
-        return float(self.config.get("limits", {}).get(section, {}).get(key, default))
+    @staticmethod
+    def _clip_range(value: float, minimum: float, maximum: float) -> float:
+        return round(max(minimum, min(maximum, float(value))), 4)
 
     @staticmethod
-    def _clip_optional(value: float | None, limit: float, default: float) -> float:
-        raw = default if value is None else float(value)
-        return max(-limit, min(limit, raw))
+    def _clip_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+        cx, cy, width, height = (float(value) for value in bbox)
+        return (
+            round(max(0.0, min(1.0, cx)), 4),
+            round(max(0.0, min(1.0, cy)), 4),
+            round(max(0.01, min(1.0, width)), 4),
+            round(max(0.01, min(1.0, height)), 4),
+        )
 
     @staticmethod
-    def _clip_range(
-        value: float | None,
-        minimum: float,
-        maximum: float,
-        default: float,
-    ) -> float:
-        raw = default if value is None else float(value)
-        return max(minimum, min(maximum, raw))
+    def _sanitize_action_description(action_type: str, description: str) -> str:
+        description = description.strip() or f"{action_type} 动作。"
+        if str(action_type) != "follow_mode":
+            description = re.sub(r"实时?跟拍|跟随|tracking|following", "开环调整", description, flags=re.IGNORECASE)
+        return description
 
     @staticmethod
-    def _clip_duration(value: float) -> float:
-        return round(max(0.0, min(15.0, float(value))), 2)
+    def _normalize_name(value: str) -> str:
+        value = value.strip().lower()
+        value = re.sub(r"[^a-z0-9_\-]+", "_", value)
+        value = re.sub(r"_+", "_", value).strip("_")
+        return value or "timeline_script"
 
     @staticmethod
-    def _default_description(command: MotionCommand) -> str:
-        return f"{command.phase}: {command.target}.{command.action}"
-
-    def _safe_default_payload(self) -> dict[str, Any]:
-        default_height = float(self.config.get("limits", {}).get("height_m", {}).get("default", 1.0))
+    def _safe_default_payload() -> dict[str, Any]:
         return {
-            "script": {
-                "title": "Safe centered filming script",
-                "summary": "连接控制器，进入准备位，执行短暂稳定跟拍，然后停止。",
-                "total_duration_s": 5.0,
-            },
-            "commands": [
+            "name": "safe_default_timeline",
+            "version": "2.0",
+            "mode": "timeline",
+            "summary": "执行保守的小幅开环机位调整，并提供默认中性打光方案。",
+            "timeline": [
                 {
-                    "id": "cmd_01",
-                    "phase": "准备阶段",
-                    "target": "base",
-                    "action": "connect",
-                    "description": "连接底盘控制器。",
+                    "id": "a1",
+                    "type": "arm_init_pose",
+                    "start_at_s": 0.0,
+                    "device": "p4",
+                    "channel": "arm",
+                    "params": {"wait_first_s": 2.0},
+                    "timeout_s": 10,
+                    "blocking": True,
+                    "on_fail": "stop_all",
+                    "description": "机械臂回到准备位。",
                 },
                 {
-                    "id": "cmd_02",
-                    "phase": "准备阶段",
-                    "target": "lift",
-                    "action": "connect",
-                    "description": "连接升降控制器。",
-                },
-                {
-                    "id": "cmd_03",
-                    "phase": "准备阶段",
-                    "target": "arm",
-                    "action": "connect",
-                    "description": "连接机械臂控制器。",
-                },
-                {
-                    "id": "cmd_04",
-                    "phase": "准备阶段",
-                    "target": "arm",
-                    "action": "preset",
-                    "preset": "ready",
-                    "description": "机械臂进入 ready 预置位。",
-                },
-                {
-                    "id": "cmd_05",
-                    "phase": "起拍动作",
-                    "target": "lift",
-                    "action": "move_to",
-                    "height_m": default_height,
-                    "description": "升降调整到稳定中景高度。",
-                },
-                {
-                    "id": "cmd_06",
-                    "phase": "跟拍动作",
-                    "target": "base",
-                    "action": "move",
-                    "linear_x": 0.10,
-                    "angular_z": 0.0,
-                    "duration_s": 3.0,
-                    "description": "底盘低速向前跟拍主体。",
-                },
-                {
-                    "id": "cmd_07",
-                    "phase": "结束动作",
-                    "target": "base",
-                    "action": "stop",
-                    "description": "停止底盘。",
-                },
-                {
-                    "id": "cmd_08",
-                    "phase": "结束动作",
-                    "target": "lift",
-                    "action": "stop",
-                    "description": "停止升降。",
-                },
-                {
-                    "id": "cmd_09",
-                    "phase": "结束动作",
-                    "target": "arm",
-                    "action": "stop",
-                    "description": "停止机械臂。",
+                    "id": "w1",
+                    "type": "wait",
+                    "start_after": ["a1"],
+                    "device": "local",
+                    "channel": "scheduler",
+                    "params": {"duration_s": 0.5},
+                    "timeout_s": 2,
+                    "blocking": True,
+                    "on_fail": "continue",
+                    "description": "等待设备稳定。",
                 },
             ],
+            "lighting_plan": default_lighting_plan(),
         }

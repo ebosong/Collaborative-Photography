@@ -2,28 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import math
-import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
-from schemas.action_script_schema import (
-    ActionScript,
-    ActionType,
-    ArmInitPoseAction,
-    ArmMoveXYZAction,
-    ArmMoveDeltaAction,
-    ArmWristAction,
-    BaseLateralAction,
-    BaseLongitudinalAction,
-    BaseRotateAction,
-    FailStrategy,
-    LiftDeltaAction,
-    VisionFailStrategy,
-    WaitAction,
-)
-from runtime.arm_adapter import ArmAdapter
 from runtime.arm_command_translator import ArmCommandTranslator
 from runtime.base_controller import BaseController
 from runtime.frame_evaluator import FrameEvaluator
@@ -31,6 +14,21 @@ from runtime.lift_controller import LiftController
 from runtime.p4_arm_controller import P4ArmController
 from runtime.vision_detector import VisionDetector
 from runtime.visual_servo_controller import VisualServoController
+from schemas.timeline_script_schema import (
+    ArmInitPoseAction,
+    ArmMoveDeltaAction,
+    ArmMoveXYZAction,
+    BaseLongitudinalAction,
+    BaseRotateAction,
+    CheckpointAction,
+    FailStrategy,
+    FollowModeAction,
+    LiftDeltaAction,
+    TimelineAction,
+    TimelineScript,
+    VisionFailStrategy,
+    WaitAction,
+)
 
 
 class ScriptExecutionError(RuntimeError):
@@ -39,68 +37,46 @@ class ScriptExecutionError(RuntimeError):
 
 class ScriptExecutor:
     """
-    Execute action scripts step by step.
+    Lower-layer executor draft for TimelineScript.
 
-    Transport split:
-    - base / lift actions -> ESP32-S3
-    - arm actions -> PC translator -> ESP32-P4 -> UART passthrough -> arm MCU
-
-    Vision closed loop:
-    - after each action, if expected_frame is enabled:
-      YOLO/mock detection -> bbox evaluation -> small-step correction using
-      base_rotate / base_longitudinal / lift_delta.
-    - first version uses MockVisionDetector. Later replace it with YOLO detector
-      without changing the execution logic.
+    The top-level Agent only emits abstract actions. This executor is the place
+    where S3/P4 commands, ACK waiting, checkpoint YOLO checks, follow_mode loops,
+    and future lighting-car conversion should live.
     """
 
     def __init__(
         self,
         repo_root: str | Path,
-        arm_config: dict[str, Any],
+        arm_config: dict[str, Any] | None = None,
         base_controller: BaseController | None = None,
         lift_controller: LiftController | None = None,
-        arm_adapter: ArmAdapter | None = None,
         p4_arm_controller: P4ArmController | None = None,
         arm_translator: ArmCommandTranslator | None = None,
         vision_detector: VisionDetector | None = None,
         frame_evaluator: FrameEvaluator | None = None,
         visual_servo: VisualServoController | None = None,
-        s3_connect_timeout_s: float | None = None,
-        p4_connect_timeout_s: float | None = None,
+        s3_connect_timeout_s: float = 30.0,
+        p4_connect_timeout_s: float = 30.0,
     ) -> None:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.repo_root = Path(repo_root)
+        self.arm_config = arm_config or {}
 
         self.base = base_controller or BaseController()
         self.lift = lift_controller or LiftController()
-        self.arm = arm_adapter or ArmAdapter(self.repo_root, arm_config)
         self.p4_arm = p4_arm_controller or P4ArmController()
         self.arm_translator = arm_translator or ArmCommandTranslator()
-
         self.vision = vision_detector or VisionDetector()
         self.frame_evaluator = frame_evaluator or FrameEvaluator()
         self.visual_servo = visual_servo or VisualServoController()
+        self.s3_connect_timeout_s = float(s3_connect_timeout_s)
+        self.p4_connect_timeout_s = float(p4_connect_timeout_s)
 
-        self.s3_connect_timeout_s = float(
-            s3_connect_timeout_s
-            if s3_connect_timeout_s is not None
-            else os.getenv("S3_CONNECT_TIMEOUT_S", "30")
-        )
-        self.p4_connect_timeout_s = float(
-            p4_connect_timeout_s
-            if p4_connect_timeout_s is not None
-            else os.getenv("P4_CONNECT_TIMEOUT_S", "30")
-        )
-
-    # --------------------------
-    # lifecycle
-    # --------------------------
     def connect(self) -> None:
         self.base.connect()
         self.lift.connect()
-        self.arm.connect()
         self.p4_arm.connect()
-        self.logger.info("Script executor connected all controllers.")
+        self.logger.info("Timeline executor connected shared S3/P4 controllers.")
 
     def close(self) -> None:
         try:
@@ -109,11 +85,8 @@ class ScriptExecutor:
             try:
                 self.lift.close()
             finally:
-                try:
-                    self.arm.close()
-                finally:
-                    self.p4_arm.close()
-        self.logger.info("Script executor closed all controllers.")
+                self.p4_arm.close()
+        self.logger.info("Timeline executor closed controllers.")
 
     def stop_all(self) -> None:
         self.logger.warning("STOP ALL triggered.")
@@ -123,134 +96,123 @@ class ScriptExecutor:
             try:
                 self.lift.stop()
             finally:
-                try:
-                    if self.p4_arm.has_client():
-                        self.p4_arm.stop()
-                    else:
-                        self.arm.stop()
-                except Exception:
-                    self.arm.stop()
+                if self.p4_arm.has_client():
+                    self.p4_arm.stop()
 
-    # --------------------------
-    # loading
-    # --------------------------
-    def load_script(self, path: str | Path) -> ActionScript:
+    def load_script(self, path: str | Path) -> TimelineScript:
         script_path = Path(path)
-        with script_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        script = ActionScript.model_validate(data)
-        self.logger.info("Loaded script '%s' with %d step(s).", script.name, len(script.sequence))
+        with script_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        script = TimelineScript.model_validate(data)
+        self.logger.info("Loaded TimelineScript '%s' with %d action(s).", script.name, len(script.timeline))
         return script
 
-    # --------------------------
-    # execution
-    # --------------------------
-    def execute_script(self, script: ActionScript) -> None:
+    def execute_script(self, script: TimelineScript) -> None:
+        """Execute actions when their start_after and start_at_s constraints are met."""
         self._wait_for_required_clients(script)
+        completed: set[str] = set()
+        started_at = time.monotonic()
 
-        self.logger.info("Start executing script: %s", script.name)
-        for index, action in enumerate(script.sequence, start=1):
-            self.logger.info("Step %d/%d | %s | %s", index, len(script.sequence), action.id, action.type)
+        self.logger.info("Start executing TimelineScript: %s", script.name)
+        while len(completed) < len(script.timeline):
+            runnable = [
+                action
+                for action in script.timeline
+                if action.id not in completed and self._can_start(action, completed, started_at)
+            ]
+            if not runnable:
+                time.sleep(0.02)
+                continue
+
+            action = runnable[0]
+            self.logger.info("Timeline action | %s | %s", action.id, action.type)
             try:
                 self._execute_action(action)
-                self._run_expected_frame_loop(action)
             except Exception as exc:
-                self.logger.exception("Action failed: %s", action.id)
-                if action.on_fail == FailStrategy.STOP_ALL:
-                    self.stop_all()
-                    raise ScriptExecutionError(f"Action {action.id} failed: {exc}") from exc
-                if action.on_fail == FailStrategy.SKIP:
-                    self.logger.warning("Skipping failed action: %s", action.id)
+                self.logger.exception("Timeline action failed: %s", action.id)
+                if self._enum_value(getattr(action, "on_fail", None)) == FailStrategy.CONTINUE.value:
+                    completed.add(action.id)
                     continue
-                if action.on_fail == FailStrategy.CONTINUE:
-                    self.logger.warning("Continuing after failed action: %s", action.id)
-                    continue
-        self.logger.info("Script finished successfully: %s", script.name)
+                self.stop_all()
+                raise ScriptExecutionError(f"Action {action.id} failed: {exc}") from exc
+            completed.add(action.id)
 
-    def _wait_for_required_clients(self, script: ActionScript) -> None:
-        needs_s3 = any(
-            action.type in {
-                ActionType.BASE_LATERAL,
-                ActionType.BASE_LONGITUDINAL,
-                ActionType.BASE_ROTATE,
-                ActionType.LIFT_DELTA,
-            }
-            for action in script.sequence
-        )
+        self.logger.info("TimelineScript finished successfully: %s", script.name)
 
-        # Vision correction may need S3 even if the script action itself is arm/wait.
-        if any(getattr(action, "expected_frame", None) and action.expected_frame.enabled for action in script.sequence):
-            needs_s3 = True
+    @staticmethod
+    def _can_start(action: TimelineAction, completed: set[str], started_at: float) -> bool:
+        if any(dep not in completed for dep in action.start_after):
+            return False
+        if action.start_at_s is not None and time.monotonic() - started_at < action.start_at_s:
+            return False
+        return True
 
-        needs_p4 = any(
-            action.type in {
-                ActionType.ARM_INIT_POSE,
-                ActionType.ARM_MOVE_XYZ,
-                ActionType.ARM_MOVE_DELTA,
-            }
-            for action in script.sequence
-        )
+    def _wait_for_required_clients(self, script: TimelineScript) -> None:
+        needs_s3 = any(action.device == "s3" for action in script.timeline)
+        needs_p4 = any(action.device == "p4" for action in script.timeline)
 
         if needs_s3:
+            self.base.connect()
+            self.lift.connect()
             tcp_server = getattr(self.base, "tcp_server", None)
-            if tcp_server is None:
-                raise ScriptExecutionError("BaseController has no tcp_server. Cannot wait for ESP32-S3 client.")
-
-            if tcp_server.has_client():
-                self.logger.info("ESP32-S3 client already connected. Ready to execute S3 actions.")
-            else:
-                self.logger.info(
-                    "This script may contain S3-controlled actions. Waiting up to %.1f s for ESP32-S3 TCP client...",
-                    self.s3_connect_timeout_s,
-                )
-                ok = tcp_server.wait_for_client(timeout_s=self.s3_connect_timeout_s)
-                if not ok:
-                    raise ScriptExecutionError(
-                        f"ESP32-S3 did not connect within {self.s3_connect_timeout_s:.1f}s."
-                    )
-                self.logger.info("ESP32-S3 TCP client connected.")
+            if tcp_server is not None and not tcp_server.has_client():
+                self.logger.info("Waiting up to %.1fs for ESP32-S3 client.", self.s3_connect_timeout_s)
+                tcp_server.wait_for_client(timeout_s=self.s3_connect_timeout_s)
 
         if needs_p4:
-            if self.p4_arm.has_client():
-                self.logger.info("ESP32-P4 client already connected. Ready to execute arm actions.")
-            else:
-                self.logger.info(
-                    "This script contains P4-controlled arm actions. Waiting up to %.1f s for ESP32-P4 TCP client...",
-                    self.p4_connect_timeout_s,
-                )
-            ok = self.p4_arm.wait_for_client(timeout_s=self.p4_connect_timeout_s)
-            if not ok:
-                raise ScriptExecutionError(
-                    f"ESP32-P4 did not connect and send ready within {self.p4_connect_timeout_s:.1f}s."
-                )
-            self.logger.info("ESP32-P4 TCP client ready.")
+            self.p4_arm.connect()
+            if not self.p4_arm.has_client():
+                self.logger.info("Waiting up to %.1fs for ESP32-P4 client.", self.p4_connect_timeout_s)
+                self.p4_arm.wait_for_client(timeout_s=self.p4_connect_timeout_s)
 
-        if not needs_s3 and not needs_p4:
-            self.logger.info("No TCP-controlled actions in this script. Skip client wait.")
-
-    def _execute_action(self, action: Any) -> None:
+    def _execute_action(self, action: TimelineAction) -> None:
         start_ts = time.monotonic()
 
-        if action.type == ActionType.ARM_INIT_POSE:
-            self._exec_arm_init_pose(action)
-        elif action.type == ActionType.ARM_WRIST:
-            self._exec_arm_wrist(action)
-        elif action.type == ActionType.ARM_MOVE_XYZ:
-            self._exec_arm_move_xyz(action)
-        elif action.type == ActionType.ARM_MOVE_DELTA:
-            self._exec_arm_move_delta(action)
-        elif action.type == ActionType.LIFT_DELTA:
-            self._exec_lift_delta(action)
-        elif action.type == ActionType.BASE_LATERAL:
-            self._exec_base_lateral(action)
-        elif action.type == ActionType.BASE_LONGITUDINAL:
-            self._exec_base_longitudinal(action)
-        elif action.type == ActionType.BASE_ROTATE:
-            self._exec_base_rotate(action)
-        elif action.type == ActionType.WAIT:
-            self._exec_wait(action)
+        if isinstance(action, BaseLongitudinalAction):
+            self.base.move_longitudinal(
+                distance_m=action.params.distance_m,
+                speed_m_s=action.params.speed_m_s,
+            )
+        elif isinstance(action, BaseRotateAction):
+            self.base.rotate(
+                radius_m=0.0,
+                angular_speed_rad_s=action.params.angular_speed_rad_s,
+                angle_deg=action.params.angle_deg,
+            )
+        elif isinstance(action, LiftDeltaAction):
+            self.lift.move_by(action.params.delta_cm / 100.0)
+        elif isinstance(action, ArmInitPoseAction):
+            raw = self.arm_translator.build_init_pose_command()
+            self.p4_arm.send_raw_command(raw)
+            if action.params.wait_first_s > 0:
+                time.sleep(action.params.wait_first_s)
+        elif isinstance(action, ArmMoveDeltaAction):
+            raw = self.arm_translator.build_delta_goal_cm(
+                front_cm=action.params.front_cm,
+                left_cm=action.params.left_cm,
+                up_cm=action.params.up_cm,
+                wrist_delta_deg=action.params.wrist_delta_deg,
+                target_t_rad=action.params.target_t_rad,
+                speed=action.params.speed,
+                update_cached_pose=True,
+            )
+            self.p4_arm.send_raw_command(raw)
+        elif isinstance(action, ArmMoveXYZAction):
+            raw = self.arm_translator.build_absolute_goal_m(
+                target_xyz_m=action.params.target_xyz_m,
+                speed=action.params.speed,
+                t_rad=action.params.target_t_rad,
+                update_cached_pose=True,
+            )
+            self.p4_arm.send_raw_command(raw)
+        elif isinstance(action, WaitAction):
+            time.sleep(action.params.duration_s)
+        elif isinstance(action, CheckpointAction):
+            self._run_checkpoint(action)
+        elif isinstance(action, FollowModeAction):
+            self._run_follow_mode(action)
         else:
-            raise ValueError(f"Unsupported action type: {action.type}")
+            raise ValueError(f"Unsupported timeline action type: {action.type}")
 
         elapsed = time.monotonic() - start_ts
         if elapsed > action.timeout_s:
@@ -258,274 +220,147 @@ class ScriptExecutor:
                 f"Action {action.id} exceeded timeout: {elapsed:.2f}s > {action.timeout_s:.2f}s"
             )
 
-    # --------------------------
-    # vision closed-loop
-    # --------------------------
-    def _run_expected_frame_loop(self, action: Any) -> None:
-        expected = getattr(action, "expected_frame", None)
-        if expected is None or not expected.enabled:
+    def _run_checkpoint(self, action: CheckpointAction) -> None:
+        if not action.expected_frame.enabled:
+            self.logger.info("Checkpoint %s has expected_frame disabled.", action.id)
             return
+        ok = self._run_visual_servo_loop(
+            step_id_prefix=action.id,
+            expected_frame=self._frame_with_servo(action.expected_frame, action.servo),
+            max_iters=action.servo.max_iters,
+            deadline_s=time.monotonic() + action.timeout_s,
+        )
+        if not ok and self._enum_value(action.on_vision_fail) == VisionFailStrategy.STOP_ALL.value:
+            raise ScriptExecutionError(f"Checkpoint {action.id} failed vision validation.")
 
-        self.logger.info(
-            "VISION loop start | action=%s target_class=%s expected_bbox=%s",
-            action.id,
-            expected.target_class,
-            expected.bbox,
+    def _run_follow_mode(self, action: FollowModeAction) -> None:
+        expected_frame = self._frame_with_servo(action.target_frame, action.servo)
+        deadline_s = time.monotonic() + action.duration_s
+        self._run_visual_servo_loop(
+            step_id_prefix=action.id,
+            expected_frame=expected_frame,
+            max_iters=action.servo.max_iters,
+            deadline_s=deadline_s,
         )
 
+    def _run_visual_servo_loop(
+        self,
+        step_id_prefix: str,
+        expected_frame: Any,
+        max_iters: int,
+        deadline_s: float,
+    ) -> bool:
         if hasattr(self.vision, "reset_for_expected_frame"):
-            self.vision.reset_for_expected_frame(expected)
+            self.vision.reset_for_expected_frame(expected_frame)
 
-        for iter_index in range(1, expected.servo.max_iters + 1):
-            detection = self.vision.detect_target(expected)
-            evaluation = self.frame_evaluator.evaluate(expected, detection)
-
+        iter_index = 0
+        while iter_index < max_iters and time.monotonic() <= deadline_s:
+            iter_index += 1
+            detection = self.vision.detect_target(expected_frame)
+            evaluation = self.frame_evaluator.evaluate(expected_frame, detection)
             self.logger.info(
-                "VISION iter %d/%d | found=%s ok=%s detected=%s errors=%s message=%s",
+                "VISION %s iter %d/%d | found=%s ok=%s errors=%s",
+                step_id_prefix,
                 iter_index,
-                expected.servo.max_iters,
+                max_iters,
                 evaluation.found,
                 evaluation.ok,
-                evaluation.detected_bbox,
                 evaluation.errors,
-                evaluation.message,
             )
-
             if evaluation.ok:
-                self.logger.info("VISION target satisfied for action=%s", action.id)
-                return
+                return True
 
             correction_data = self.visual_servo.make_next_correction(
-                expected_frame=expected,
+                expected_frame=expected_frame,
                 evaluation=evaluation,
-                step_id_prefix=action.id,
+                step_id_prefix=step_id_prefix,
                 iter_index=iter_index,
             )
-
             if correction_data is None:
-                self.logger.warning("VISION no correction action generated for action=%s", action.id)
-                break
-
-            correction_action = self._validate_correction_action(correction_data)
-            self.logger.info(
-                "VISION correction | %s | params=%s",
-                correction_action.type,
-                correction_action.params.model_dump(),
-            )
-
+                return False
+            correction_action = TimelineScript.model_validate(
+                {
+                    "name": "vision_correction",
+                    "version": "2.0",
+                    "mode": "timeline",
+                    "summary": "视觉伺服修正动作。",
+                    "timeline": [self._normalize_correction_action(correction_data)],
+                    "lighting_plan": [
+                        {
+                            "id": "light_default",
+                            "start_at_s": 0.0,
+                            "color_temperature": "neutral",
+                            "intensity": "medium",
+                            "azimuth": "front",
+                            "height": "middle",
+                            "description": "默认中性光、中等强度、正面中光。",
+                        }
+                    ],
+                }
+            ).timeline[0]
             self._execute_action(correction_action)
-
             if hasattr(self.vision, "apply_correction_action"):
-                self.vision.apply_correction_action(correction_action, expected)
+                self.vision.apply_correction_action(correction_action, expected_frame)
 
-            settle_s = float(expected.servo.settle_s)
-            if settle_s > 0:
-                time.sleep(settle_s)
+        return False
 
-        msg = f"VISION failed to satisfy expected frame after {expected.servo.max_iters} iterations for action={action.id}"
-        if expected.on_vision_fail == VisionFailStrategy.STOP_ALL:
-            raise ScriptExecutionError(msg)
-        if expected.on_vision_fail == VisionFailStrategy.SKIP_CORRECTION:
-            self.logger.warning("%s; skip correction and continue.", msg)
-            return
+    @staticmethod
+    def _normalize_correction_action(data: dict[str, Any]) -> dict[str, Any]:
+        action = dict(data)
+        action.pop("note", None)
+        action.setdefault("description", "视觉伺服小幅修正。")
+        action.setdefault("blocking", True)
+        action.setdefault("timeout_s", 5.0)
+        action.setdefault("on_fail", "continue")
+        if action.get("type") in {"base_longitudinal", "base_rotate"}:
+            action.setdefault("device", "s3")
+            action.setdefault("channel", "base")
+            params = action.setdefault("params", {})
+            params.pop("radius_m", None)
+        elif action.get("type") == "lift_delta":
+            action.setdefault("device", "s3")
+            action.setdefault("channel", "lift")
+        return action
 
-        self.logger.warning("%s; continue by policy.", msg)
+    @staticmethod
+    def _frame_with_servo(frame: Any, servo: Any) -> Any:
+        """Adapt TimelineScript vision config to the visual-servo controller interface."""
+        use_actions = []
+        if servo.allow_base:
+            use_actions.extend(["base_longitudinal", "base_rotate"])
+        if servo.allow_lift:
+            use_actions.append("lift_delta")
+        if servo.allow_arm:
+            use_actions.append("arm_move_delta")
 
-    def _validate_correction_action(self, correction_data: dict) -> Any:
-        tmp_script = ActionScript.model_validate(
-            {
-                "name": "vision_correction",
-                "version": "1.0",
-                "sequence": [correction_data],
-            }
+        tolerance = SimpleNamespace(
+            center_x=frame.tolerance.center_x,
+            center_y=frame.tolerance.center_y,
+            width=frame.tolerance.width,
+            height=frame.tolerance.height,
+            area=max(float(frame.tolerance.width) * float(frame.tolerance.height), 0.01),
         )
-        return tmp_script.sequence[0]
-
-    # --------------------------
-    # arm actions
-    # --------------------------
-    def _exec_arm_init_pose(self, action: ArmInitPoseAction) -> None:
-        self.logger.info("ARM init pose | via P4 raw forwarding")
-        raw = self.arm_translator.build_init_pose_command()
-        self.p4_arm.send_raw_command(raw)
-
-        self.arm_translator.set_cached_pose_mm(
-            x_mm=150.0,
-            y_mm=0.0,
-            z_mm=200.0,
-            t_rad=3.14,
+        servo_adapter = SimpleNamespace(
+            max_iters=int(servo.max_iters),
+            use_actions=use_actions,
+            max_step=SimpleNamespace(longitudinal_m=0.05, rotate_deg=3.0, lift_cm=1.0),
+            gain=SimpleNamespace(
+                longitudinal_m_per_area=0.30,
+                rotate_deg_per_norm_x=-12.0,
+                lift_cm_per_norm_y=-6.0,
+            ),
+            direction_sign=SimpleNamespace(longitudinal=1.0, rotate=1.0, lift=1.0),
         )
-
-        wait_s = float(action.params.wait_first_s)
-        if wait_s > 0:
-            self.logger.info("ARM init pose | local wait %.2f s for arm settle", wait_s)
-            time.sleep(wait_s)
-
-    def _exec_arm_wrist(self, action: ArmWristAction) -> None:
-        pitch_deg = action.params.pitch_deg
-        speed_deg_s = action.params.speed_deg_s
-
-        self.logger.info(
-            "ARM wrist move | pitch_deg=%.2f speed_deg_s=%.2f | local placeholder path",
-            pitch_deg,
-            speed_deg_s,
-        )
-
-        if hasattr(self.arm, "set_wrist_pitch"):
-            self.arm.set_wrist_pitch(pitch_deg=pitch_deg, speed_deg_s=speed_deg_s)
-        else:
-            command = f"[ARM CMD] wrist_pitch pitch_deg={pitch_deg:.2f} speed_deg_s={speed_deg_s:.2f}"
-            print(command)
-            self.logger.info(command)
-            time.sleep(abs(pitch_deg) / max(speed_deg_s, 1e-6))
-
-    def _exec_arm_move_xyz(self, action: ArmMoveXYZAction) -> None:
-        x_m, y_m, z_m = action.params.target_xyz_m
-        speed = float(action.params.speed)
-        target_t_rad = action.params.target_t_rad
-
-        self.logger.info(
-            "ARM xyz goal move | target=(%.3f, %.3f, %.3f) t=%s spd=%.3f | T=104 single command -> P4",
-            x_m,
-            y_m,
-            z_m,
-            "cached" if target_t_rad is None else f"{target_t_rad:.4f}",
-            speed,
+        return SimpleNamespace(
+            enabled=getattr(frame, "enabled", True),
+            target_class=frame.target_class,
+            target_id=frame.target_id,
+            bbox_format=frame.bbox_format,
+            bbox=frame.bbox,
+            tolerance=tolerance,
+            servo=servo_adapter,
         )
 
-        if action.params.start_xyz_m is not None:
-            sx_m, sy_m, sz_m = action.params.start_xyz_m
-            self.arm_translator.set_cached_pose_mm(
-                x_mm=float(sx_m) * 1000.0,
-                y_mm=float(sy_m) * 1000.0,
-                z_mm=float(sz_m) * 1000.0,
-            )
-            self.logger.info(
-                "ARM xyz goal move | cache reset from start_xyz_m=(%.3f, %.3f, %.3f)",
-                sx_m,
-                sy_m,
-                sz_m,
-            )
-
-        raw = self.arm_translator.build_absolute_goal_m(
-            target_xyz_m=[float(x_m), float(y_m), float(z_m)],
-            speed=speed,
-            t_rad=target_t_rad,
-            update_cached_pose=True,
-        )
-
-        self.logger.info("ARM xyz goal move | raw=%s cached_pose=%s", raw, self.arm_translator.get_cached_pose())
-        self.p4_arm.send_raw_command(raw)
-
-    def _exec_arm_move_delta(self, action: ArmMoveDeltaAction) -> None:
-        p = action.params
-
-        self.logger.info(
-            "ARM delta goal move | front_cm=%.2f left_cm=%.2f up_cm=%.2f wrist_delta_deg=%.2f target_t_rad=%s spd=%.3f | T=104 single command -> P4",
-            p.front_cm,
-            p.left_cm,
-            p.up_cm,
-            p.wrist_delta_deg,
-            "None" if p.target_t_rad is None else f"{p.target_t_rad:.4f}",
-            p.speed,
-        )
-
-        raw = self.arm_translator.build_delta_goal_cm(
-            front_cm=p.front_cm,
-            left_cm=p.left_cm,
-            up_cm=p.up_cm,
-            wrist_delta_deg=p.wrist_delta_deg,
-            target_t_rad=p.target_t_rad,
-            speed=p.speed,
-            update_cached_pose=True,
-        )
-
-        self.logger.info("ARM delta goal move | raw=%s cached_pose=%s", raw, self.arm_translator.get_cached_pose())
-        self.p4_arm.send_raw_command(raw)
-
-    # --------------------------
-    # lift actions
-    # --------------------------
-    def _exec_lift_delta(self, action: LiftDeltaAction) -> None:
-        delta_cm = action.params.delta_cm
-        delta_m = delta_cm / 100.0
-
-        self.logger.info("LIFT delta move | delta_cm=%.2f", delta_cm)
-        self.lift.move_by(delta_m)
-
-    # --------------------------
-    # base actions
-    # --------------------------
-    def _exec_base_lateral(self, action: BaseLateralAction) -> None:
-        distance_m = action.params.distance_m
-        speed_m_s = action.params.speed_m_s
-
-        self.logger.info("BASE lateral | distance_m=%.3f speed_m_s=%.3f", distance_m, speed_m_s)
-
-        if hasattr(self.base, "move_lateral"):
-            self.base.move_lateral(distance_m=distance_m, speed_m_s=speed_m_s)
-            return
-
-        command = f"[BASE CMD] lateral distance_m={distance_m:.3f} speed_m_s={speed_m_s:.3f}"
-        print(command)
-        self.logger.info("%s (legacy fallback: no move_lateral API)", command)
-        time.sleep(abs(distance_m) / max(speed_m_s, 1e-6))
-        self.base.stop()
-
-    def _exec_base_longitudinal(self, action: BaseLongitudinalAction) -> None:
-        distance_m = action.params.distance_m
-        speed_m_s = action.params.speed_m_s
-        duration_s = abs(distance_m) / max(speed_m_s, 1e-6)
-
-        self.logger.info(
-            "BASE longitudinal | distance_m=%.3f speed_m_s=%.3f duration_s=%.3f",
-            distance_m,
-            speed_m_s,
-            duration_s,
-        )
-
-        if hasattr(self.base, "move_longitudinal"):
-            self.base.move_longitudinal(distance_m=distance_m, speed_m_s=speed_m_s)
-            return
-
-        linear_x = speed_m_s if distance_m >= 0 else -speed_m_s
-        self.base.move(linear_x=linear_x, angular_z=0.0)
-        time.sleep(duration_s)
-        self.base.stop()
-
-    def _exec_base_rotate(self, action: BaseRotateAction) -> None:
-        radius_m = action.params.radius_m
-        angular_speed_rad_s = action.params.angular_speed_rad_s
-        angle_deg = action.params.angle_deg
-
-        signed_w = angular_speed_rad_s if angle_deg >= 0 else -angular_speed_rad_s
-        linear_x = abs(angular_speed_rad_s) * radius_m
-        duration_s = math.radians(abs(angle_deg)) / max(abs(angular_speed_rad_s), 1e-6)
-
-        self.logger.info(
-            "BASE rotate | radius_m=%.3f angular_speed_rad_s=%.3f angle_deg=%.3f duration_s=%.3f",
-            radius_m,
-            signed_w,
-            angle_deg,
-            duration_s,
-        )
-
-        if hasattr(self.base, "rotate"):
-            self.base.rotate(
-                radius_m=radius_m,
-                angular_speed_rad_s=abs(angular_speed_rad_s),
-                angle_deg=angle_deg,
-            )
-            return
-
-        self.base.move(linear_x=linear_x, angular_z=signed_w)
-        time.sleep(duration_s)
-        self.base.stop()
-
-    # --------------------------
-    # other
-    # --------------------------
-    def _exec_wait(self, action: WaitAction) -> None:
-        duration_s = action.params.duration_s
-        self.logger.info("WAIT | duration_s=%.3f", duration_s)
-        time.sleep(duration_s)
+    @staticmethod
+    def _enum_value(value: Any) -> str:
+        return getattr(value, "value", str(value))

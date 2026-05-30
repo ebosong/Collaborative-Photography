@@ -1,13 +1,4 @@
-"""Top-level entry point for the interactive CamBot planning agent.
-
-This version performs a hardware connection precheck before asking for the
-initial prompt:
-
-    1. Start S3 TCP server on 2345.
-    2. Start P4 TCP server on 2346.
-    3. Wait until ESP32-S3 and ESP32-P4 are connected.
-    4. Then ask the user for the filming prompt / or use --instruction.
-"""
+"""Top-level entry point for the interactive CamBot TimelineScript agent."""
 
 from __future__ import annotations
 
@@ -43,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-execute-after-confirm",
         action="store_true",
-        help="Only save the confirmed plan and do not run the CamBot executor.",
+        help="Only mark the TimelineScript confirmed; do not invoke the save adapter.",
     )
     parser.add_argument(
         "--skip-device-precheck",
@@ -110,11 +101,11 @@ def main() -> int:
                     response = service.confirm_plan_only(response.session_id)
                 else:
                     response = service.confirm_plan(response.session_id)
-                logger.info("Confirmed plan: %s", json.dumps(response.plan, ensure_ascii=False))
+                logger.info("Confirmed TimelineScript: %s", json.dumps(response.plan, ensure_ascii=False))
                 print(response.message)
                 if args.no_execute_after_confirm:
                     print(response.review)
-                    print("Plan confirmed and saved. Execution is disabled.")
+                    print("TimelineScript confirmed and saved. Adapter invocation is disabled.")
                     continue
                 break
             if command == "unconfirm":
@@ -237,7 +228,7 @@ def _print_help() -> None:
     print(
         "\nCommands:\n"
         "  /review     show the current natural-language filming plan\n"
-        "  /confirm    confirm, save, and execute the current plan\n"
+        "  /confirm    confirm and save the current TimelineScript\n"
         "  /unconfirm  cancel confirmation and keep editing\n"
         "  /quit       exit\n"
         "Type natural-language feedback to revise the current plan."

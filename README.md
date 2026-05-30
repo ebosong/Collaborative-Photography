@@ -1,25 +1,24 @@
-# CamBot Interactive Agent
+# CamBot Interactive Timeline Agent
 
 [English](./README.md) | [简体中文](./README-CN.md)
 
-CamBot uses an interactive LLM agent for filming-script design. The agent keeps a structured JSON command script internally, shows users a natural-language review, accepts natural-language revision requests, and only treats the script as final after the user confirms it.
+CamBot uses an interactive LLM agent to generate top-level filming scripts. The current protocol is `TimelineScript`: the top-level Agent outputs strict JSON with timeline actions, checkpoint/follow-mode vision intent, and lighting intent. Concrete S3/P4/YOLO/lighting-car scheduling belongs to the lower execution system.
 
 Current flow:
 
-Natural-language instruction -> local JSON RAG retrieval -> LLM strict executable JSON script -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> command dispatch
+Natural-language instruction -> local JSON RAG retrieval -> LLM strict `TimelineScript` -> JSON repair and validation -> natural-language review -> user revisions -> confirmation -> saved final JSON
 
 ## Current Scope
 
 - Start a planning session from one filming instruction
-- Let the LLM output the complete executable JSON command script
-- Show users a simple summary plus detailed action-by-action filming plan
+- Let the LLM output a complete `TimelineScript`
+- Support `base_longitudinal`, `base_rotate`, `lift_delta`, `arm_init_pose`, `arm_move_delta`, `arm_move_xyz`, and `wait`
+- Support `checkpoint` and `follow_mode` vision target configuration
+- Always output `lighting_plan`; use neutral/medium/front/middle by default
+- Render a user-facing review of timeline actions and lighting intent
 - Support iterative natural-language revisions until confirmation
-- Ask a clarification question for broad or vague feedback
 - Save JSON, review text, conversation history, and metadata per session
-- Expose a web-ready Python service layer for future frontend integration
-- Continue to support the existing Qwen/OpenAI-compatible provider and mock fallback
-- Confirm and execute the final JSON script from both CLI and future web calls
-- Print wrapped lower-level control commands instead of sending them to real hardware in the current mock setup
+- On confirmation, save the final JSON; the top-level Agent does not directly dispatch hardware
 
 ## Repository Structure
 
@@ -31,196 +30,154 @@ agent/
   reviewer.py
   json_repair.py
   log_store.py
-config/
-  default.yaml
-rag/
-  shot_templates.json
-  skill_rules.json
-  safety_rules.json
 chain/
   retriever.py
   prompt_builder.py
   planner.py
   validator.py
 schemas/
-  script_schema.py
+  timeline_script_schema.py
 runtime/
   cambot_executor.py
-  base_controller.py
-  lift_controller.py
-  arm_adapter.py
 providers/
   llm_provider.py
-utils/
-  logger.py
-  io.py
-logs/
-RoArm-M2-S_python/
-  roarm_motion_api.py
-  ...
 ```
 
 ## Agent API For Future Web UI
 
-The frontend-facing layer is `agent.service.PlanAgentService`. A web backend can call these methods directly:
+The frontend-facing layer is `agent.service.PlanAgentService`:
 
 - `create_session(initial_instruction)`
 - `send_message(session_id, user_message)`
 - `review_plan(session_id)`
-- `confirm_plan(session_id)` confirms and executes the final JSON command script
-- `confirm_plan_only(session_id)` confirms and saves without execution
+- `confirm_plan(session_id)` confirms and saves the final `TimelineScript`
+- `confirm_plan_only(session_id)` confirms and saves without invoking the confirmation adapter
 - `unconfirm_plan(session_id)`
 - `get_current_plan(session_id)`
-- `execute_confirmed_plan(session_id)` returns the confirmed script for lower-level integrations
-
-`AgentResponse` returns the `session_id`, status, user-facing review text, optional JSON plan, and confirmation flag.
+- `execute_confirmed_plan(session_id)` returns the confirmed script for lower-layer integrations
 
 ## CLI Usage
 
-Mock mode is enabled by default in `config/default.yaml`, so the app can run without live Qwen credentials.
-
 ```bash
-python app.py --instruction "Give me a smooth medium follow shot, keep the subject near the center, then stop at the end."
+python app.py --instruction "Back up a little, lower the camera, check that the person is centered, and use warm side middle light."
 ```
 
-If `--instruction` is omitted, the CLI asks for the first filming requirement.
+Save without invoking the confirmation adapter:
+
+```bash
+python app.py --instruction "A stable centered shot." --no-execute-after-confirm
+```
 
 Interactive commands:
 
 ```text
 /review     show the current natural-language shooting plan
-/confirm    confirm, save, and execute the current script
+/confirm    confirm and save the current script
 /unconfirm  cancel confirmation and keep editing
 /quit       exit
 ```
 
-Any other input is treated as a natural-language revision request, such as:
+## LLM Provider Configuration
 
-```text
-Move the subject to the left side and make the shot a little closer.
-```
-
-After `/confirm`, the CLI sends the confirmed JSON command script to the CamBot executor and exits when execution finishes.
-
-## Save Without Execution
-
-For planning-only debugging, disable execution after confirmation:
-
-```bash
-python app.py --instruction "A stable centered follow shot." --no-execute-after-confirm
-```
-
-The web-facing `confirm_plan()` has the same meaning as the CLI confirmation command: it confirms the final JSON script and dispatches it through the executor. In the current mock setup, the executor prints the wrapped lower-level commands rather than sending them to real hardware.
-
-## Session Logs
-
-Each session is saved under:
-
-```text
-logs/sessions/<session_id>/
-```
-
-Files:
-
-- `plan.json`: latest structured command script
-- `review.md`: latest user-facing natural-language review
-- `conversation.jsonl`: user, assistant, and system messages
-- `metadata.json`: session id, timestamps, confirmation state
-
-The app-level log is still written to:
-
-```text
-logs/cambot.log
-```
-
-## Qwen API Configuration
-
-Configure Qwen directly in `config/default.yaml`. No environment variables are required.
+`config/default.yaml` keeps hardcoded provider profiles. Qwen remains the default; switch to DeepSeek by changing `llm.provider`:
 
 ```yaml
 llm:
-  provider: qwen_openai_compatible
-  api_key: "your_api_key"
-  base_url: "https://your-openai-compatible-endpoint/v1"
-  model: "qwen-plus"
-  temperature: 0.1
-  timeout_s: 30
-  use_mock_when_unconfigured: true
+  provider: deepseek_openai_compatible
+  providers:
+    deepseek_openai_compatible:
+      api_key: "sk-your-deepseek-api-key"
+      base_url: "https://api.deepseek.com"
+      model: "deepseek-v4-flash"
 ```
 
-If `api_key` or `base_url` is left empty, the app falls back to the built-in mock planner output.
+The provider is OpenAI-compatible, so the same `langchain-openai` path is used for Qwen and DeepSeek.
 
 ## Expected JSON Shape
 
-The planner must return one complete executable command script:
+The planner must return one strict JSON object:
 
 ```json
 {
-  "script": {
-    "title": "Smooth centered follow shot",
-    "summary": "逐条下发底盘、升降和机械臂控制指令，完成稳定中景跟拍。",
-    "total_duration_s": 8.0
-  },
-  "commands": [
+  "name": "back_lower_checkpoint_warm_side_light",
+  "version": "2.0",
+  "mode": "timeline",
+  "summary": "机器人先开环后退，再降低机位，随后检查人物构图，并使用暖光侧面中光。",
+  "timeline": [
     {
-      "id": "cmd_01",
-      "phase": "准备阶段",
-      "target": "base",
-      "action": "connect",
-      "description": "连接底盘控制器。"
+      "id": "b1",
+      "type": "base_longitudinal",
+      "start_at_s": 0.0,
+      "device": "s3",
+      "channel": "base",
+      "params": {
+        "distance_m": -0.2,
+        "speed_m_s": 0.1
+      },
+      "timeout_s": 8,
+      "blocking": true,
+      "on_fail": "stop_all",
+      "description": "小车后退 20 cm。"
     },
     {
-      "id": "cmd_02",
-      "phase": "起拍动作",
-      "target": "lift",
-      "action": "move_to",
-      "height_m": 1.2,
-      "description": "升降调整到中景跟拍高度。"
-    },
+      "id": "cp1",
+      "type": "checkpoint",
+      "start_after": ["b1"],
+      "device": "local",
+      "channel": "vision",
+      "expected_frame": {
+        "enabled": true,
+        "target_class": "person",
+        "target_id": "main_actor",
+        "bbox_format": "cxcywh_norm",
+        "bbox": [0.5, 0.52, 0.35, 0.65],
+        "tolerance": {
+          "center_x": 0.05,
+          "center_y": 0.05,
+          "width": 0.08,
+          "height": 0.1
+        }
+      },
+      "servo": {
+        "max_iters": 8,
+        "allow_base": true,
+        "allow_lift": true,
+        "allow_arm": false
+      },
+      "timeout_s": 30,
+      "blocking": true,
+      "on_vision_fail": "continue",
+      "description": "检查人物是否位于预期画面中部。"
+    }
+  ],
+  "lighting_plan": [
     {
-      "id": "cmd_03",
-      "phase": "跟拍动作",
-      "target": "base",
-      "action": "move",
-      "linear_x": 0.18,
-      "angular_z": 0.0,
-      "duration_s": 6.0,
-      "description": "底盘低速向前移动，保持主体稳定跟拍。"
-    },
-    {
-      "id": "cmd_04",
-      "phase": "结束动作",
-      "target": "base",
-      "action": "stop",
-      "description": "停止底盘运动。"
+      "id": "light1",
+      "start_at_s": 0.0,
+      "color_temperature": "warm",
+      "intensity": "medium",
+      "azimuth": "side",
+      "height": "middle",
+      "description": "暖光、中等强度、侧面中光。"
     }
   ]
 }
 ```
 
-Supported command targets: `base`, `lift`, `arm`, `wait`.
+Constraint summary:
 
-Supported command actions: `connect`, `move`, `move_to`, `move_by`, `preset`, `stop`, `wait`.
-
-The validator clips unsafe command values and appends missing final stop commands for `base`, `lift`, and `arm`.
+- `version` is exactly `"2.0"` and `mode` is exactly `"timeline"`
+- `timeline[].id` values are globally unique
+- `start_after` references must exist
+- Only `follow_mode` may be described as following/tracking
+- `checkpoint` outputs only expected framing and servo configuration, not correction actions
+- `lighting_plan` outputs lighting intent only, not lighting-car paths
+- The top-level Agent does not output `stop` actions, lower-device native commands, or arm `T=100/T=104/T=1041` commands
 
 ## Dependencies
-
-Minimal recommended install:
 
 ```bash
 pip install pydantic PyYAML langchain-core langchain-openai pyserial
 ```
 
-Notes:
-
-- `pyserial` is only needed if the real arm connection is enabled later.
-- In default mock mode, live Qwen credentials are not required.
-
-## Notes
-
-- The LLM now plans the full executable command script, not only high-level filming parameters.
-- The natural-language review is rendered directly from validated JSON commands so users see the same action sequence that `/confirm` will dispatch.
-- JSON repair first tries extraction and strict validation, then asks the configured provider to repair the JSON, then falls back to the previous valid plan when available.
-- `runtime/cambot_executor.py` dispatches the command list through wrapped lower-level controller interfaces.
-- Existing RoArm control files remain unchanged.
+In default mock mode, live Qwen credentials are not required.

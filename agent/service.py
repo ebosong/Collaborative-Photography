@@ -16,7 +16,7 @@ from chain.planner import Planner
 from chain.prompt_builder import PromptBuilder
 from chain.retriever import LocalJsonRetriever
 from runtime.cambot_executor import CamBotExecutor
-from schemas.script_schema import ScriptPlan
+from schemas.timeline_script_schema import TimelineScript
 
 
 ExecutorFactory = Callable[..., Any]
@@ -162,7 +162,7 @@ class PlanAgentService:
         status = "confirmed" if session.confirmed else "draft"
         return self._response(session, status, "Current JSON filming plan.", include_plan=True)
 
-    def execute_confirmed_plan(self, session_id: str) -> ScriptPlan:
+    def execute_confirmed_plan(self, session_id: str) -> TimelineScript:
         """Return a confirmed plan for lower-level integrations."""
         session = self._get_session(session_id)
         if not session.confirmed:
@@ -187,7 +187,7 @@ class PlanAgentService:
             top_k=int(self.config["planner"].get("top_k", 2)),
         )
 
-    def _update_plan(self, session: AgentSession, plan: ScriptPlan) -> None:
+    def _update_plan(self, session: AgentSession, plan: TimelineScript) -> None:
         session.current_plan = plan
         session.current_review = self.reviewer.render(plan)
         session.touch()

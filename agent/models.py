@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from schemas.script_schema import ScriptPlan
+from schemas.timeline_script_schema import TimelineScript
 
 
 ConversationRole = Literal["user", "assistant", "system"]
@@ -38,7 +38,7 @@ class AgentSession(BaseModel):
 
     session_id: str
     initial_instruction: str
-    current_plan: ScriptPlan | None = None
+    current_plan: TimelineScript | None = None
     current_review: str = ""
     conversation: list[ConversationMessage] = Field(default_factory=list)
     confirmed: bool = False

@@ -8,7 +8,7 @@ from typing import Any
 
 from chain.validator import PlanValidator
 from providers.llm_provider import LLMProvider
-from schemas.script_schema import ScriptPlan
+from schemas.timeline_script_schema import TimelineScript
 
 
 class JsonRepairer:
@@ -23,8 +23,8 @@ class JsonRepairer:
     def repair_and_validate(
         self,
         raw_text: str,
-        previous_plan: ScriptPlan | None = None,
-    ) -> ScriptPlan:
+        previous_plan: TimelineScript | None = None,
+    ) -> TimelineScript:
         """Return a validated plan, using repair attempts before safe fallback."""
         for candidate in self._candidate_texts(raw_text):
             plan = self._try_validate(candidate, previous_plan=previous_plan)
@@ -48,8 +48,8 @@ class JsonRepairer:
     def _try_validate(
         self,
         candidate: str,
-        previous_plan: ScriptPlan | None = None,
-    ) -> ScriptPlan | None:
+        previous_plan: TimelineScript | None = None,
+    ) -> TimelineScript | None:
         payload = self._load_object(candidate)
         if payload is None:
             return None
@@ -84,7 +84,7 @@ class JsonRepairer:
 
     @staticmethod
     def _is_partial_payload(payload: dict[str, Any]) -> bool:
-        return "commands" not in payload
+        return "timeline" not in payload
 
     def _candidate_texts(self, raw_text: str) -> list[str]:
         candidates = [raw_text.strip()]
@@ -93,7 +93,7 @@ class JsonRepairer:
             candidates.append(extracted)
         return [candidate for candidate in candidates if candidate]
 
-    def _llm_repair(self, raw_text: str, previous_plan: ScriptPlan | None = None) -> str | None:
+    def _llm_repair(self, raw_text: str, previous_plan: TimelineScript | None = None) -> str | None:
         current_plan_block = ""
         if previous_plan is not None:
             current_plan_block = (
@@ -102,10 +102,13 @@ class JsonRepairer:
                 "If the broken text cannot be repaired safely, return the current JSON plan unchanged.\n"
             )
         prompt = (
-            "Fix the following text into one strict JSON object for the CamBot plan schema.\n"
+            "Fix the following text into one strict JSON object for the CamBot TimelineScript schema.\n"
             "Return JSON only. Do not add markdown or prose.\n"
-            "Required top-level fields: script and commands.\n"
-            "commands must be an ordered list of executable lower-level control commands.\n"
+            "Required top-level fields: name, version, mode, summary, timeline, lighting_plan.\n"
+            "version must be \"2.0\" and mode must be \"timeline\".\n"
+            "timeline must contain high-level actions only: base_longitudinal, base_rotate, lift_delta, arm_init_pose, arm_move_delta, arm_move_xyz, wait, checkpoint, follow_mode.\n"
+            "Do not output stop actions, raw arm commands, or lower-level device/action/cmd_id payloads.\n"
+            "lighting_plan must be present; use the default neutral/medium/front/middle entry when unspecified.\n"
             f"{current_plan_block}"
             "Original text:\n"
             f"{raw_text}"
@@ -126,11 +129,11 @@ class JsonRepairer:
 
     @staticmethod
     def _unwrap_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        canonical_keys = {"script", "commands"}
+        canonical_keys = {"name", "version", "mode", "summary", "timeline", "lighting_plan"}
         if canonical_keys.intersection(payload):
             return payload
 
-        for key in ("plan", "script_plan", "revised_plan", "json"):
+        for key in ("plan", "timeline_script", "script_plan", "revised_plan", "json"):
             nested = payload.get(key)
             if isinstance(nested, dict):
                 return nested
@@ -147,11 +150,7 @@ class JsonRepairer:
 
     @staticmethod
     def _normalize_leaf_fields(payload: dict[str, Any]) -> dict[str, Any]:
-        section_by_field = {
-            "title": "script",
-            "summary": "script",
-            "total_duration_s": "script",
-        }
+        section_by_field: dict[str, str] = {}
 
         normalized: dict[str, Any] = {}
         for key, value in payload.items():

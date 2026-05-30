@@ -84,19 +84,6 @@ class P4ArmController:
         }
         self._send_payload(payload, f"[P4 ARM CMD] forward_raw {raw_command}")
 
-    def send_raw_batch(self, commands: list[str]) -> None:
-        payload = {
-            "device": "arm",
-            "action": "forward_raw_batch",
-            "params": {
-                "commands": commands,
-            },
-        }
-        self._send_payload(
-            payload,
-            f"[P4 ARM CMD] forward_raw_batch count={len(commands)}",
-        )
-
     def stop(self) -> None:
         # Keep the stop format simple and raw-command based.
         # Adjust later if the P4 side wants another action type.
