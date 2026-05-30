@@ -1,0 +1,11 @@
+[
+  {
+    "name": "global_safety_defaults",
+    "max_speed": 0.5,
+    "max_angular_speed": 0.6,
+    "max_lift_delta": 0.05,
+    "lost_target_action": "slow_stop_and_search",
+    "default_fallback_template": "mid_follow_safe",
+    "text": "Clamp motion to safe limits. If the target is lost, stop the chassis, stop lift movement, and enter a minimal search/wait placeholder."
+  }
+]

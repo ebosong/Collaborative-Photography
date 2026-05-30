@@ -1,0 +1,1 @@
+& "C:\Users\10225\Desktop\1\Collaborative-Photography-main\Collaborative-Photography-main\.venv\Scripts\Activate.ps1"
