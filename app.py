@@ -29,7 +29,16 @@ def parse_args() -> argparse.Namespace:
         "--config",
         type=str,
         default="config/default.yaml",
-        help="Path to YAML config file.",
+        help="Path to the main YAML config file used by the agent.",
+    )
+    parser.add_argument(
+        "--runtime-config",
+        type=str,
+        default="config.yaml",
+        help=(
+            "Optional runtime override YAML. If present, it is merged into the main config. "
+            "Use this for TimelineScheduler settings such as expected_board_ids, camera_index, and mock_acks."
+        ),
     )
     parser.add_argument(
         "--no-execute-after-confirm",
@@ -39,7 +48,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-device-precheck",
         action="store_true",
-        help="Skip waiting for ESP32-S3/P4 before asking for the prompt.",
+        help=(
+            "Compatibility flag. Startup device precheck is skipped by default because "
+            "TimelineScheduler waits for boards after /confirm."
+        ),
+    )
+    parser.add_argument(
+        "--device-precheck",
+        action="store_true",
+        help=(
+            "Enable the old startup precheck before prompt input. Usually leave this off; "
+            "the new flow waits for boards after /confirm."
+        ),
     )
     parser.add_argument(
         "--device-wait-timeout",
@@ -55,20 +75,28 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
     config = load_yaml(repo_root / args.config)
+    runtime_config_path = repo_root / args.runtime_config
+    if runtime_config_path.exists():
+        runtime_overrides = load_yaml(runtime_config_path)
+        if isinstance(runtime_overrides, dict):
+            _deep_merge(config, runtime_overrides)
     log_file = setup_logging(repo_root / config["app"]["log_dir"])
     logger = logging.getLogger("app")
+    if runtime_config_path.exists():
+        logger.info("Runtime config override loaded from %s", runtime_config_path)
 
     precheck_handles: dict[str, Any] = {}
 
     try:
-        if not args.skip_device_precheck:
+        if args.device_precheck and not args.skip_device_precheck:
             precheck_handles = wait_for_esp32_clients(
                 config=config,
                 timeout_s=float(args.device_wait_timeout),
             )
 
-        # Important: the device precheck intentionally happens before reading
-        # the prompt, so the user sees the hardware status first.
+        # In the current execution flow, hardware waiting happens after /confirm
+        # inside TimelineScheduler. This keeps the agent interaction available before
+        # the robot starts executing the confirmed TimelineScript.
         instruction = args.instruction or input("Enter initial filming request: ").strip()
         if not instruction:
             print("Initial filming request is required.")
@@ -138,6 +166,16 @@ def main() -> int:
             except Exception:
                 logger.debug("Ignoring close error for %s.", name, exc_info=True)
 
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge override into base and return base."""
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
 
 def wait_for_esp32_clients(config: dict[str, Any], timeout_s: float = 60.0) -> dict[str, Any]:
     """

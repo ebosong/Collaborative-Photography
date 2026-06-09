@@ -18,7 +18,7 @@ Natural-language instruction -> local JSON RAG retrieval -> LLM strict `Timeline
 - Render a user-facing review of timeline actions and lighting intent
 - Support iterative natural-language revisions until confirmation
 - Save JSON, review text, conversation history, and metadata per session
-- On confirmation, save the final JSON; the top-level Agent does not directly dispatch hardware
+- On confirmation, save the final JSON and optionally invoke the lower `TimelineScheduler`; the top-level Agent still emits only abstract `TimelineScript`
 
 ## Repository Structure
 
@@ -39,6 +39,14 @@ schemas/
   timeline_script_schema.py
 runtime/
   cambot_executor.py
+  timeline_scheduler.py
+  timeline_command_translator.py
+  checkpoint_correction_planner.py
+  subject_match_detector.py
+showcase/
+  index.html
+  styles.css
+  app.js
 providers/
   llm_provider.py
 ```
@@ -67,6 +75,15 @@ Save without invoking the confirmation adapter:
 ```bash
 python app.py --instruction "A stable centered shot." --no-execute-after-confirm
 ```
+
+Use a local runtime override when running real hardware:
+
+```bash
+copy config\runtime.example.yaml config.yaml
+python app.py --instruction "Back up a little and check the subject framing."
+```
+
+`config.yaml`, model weights, camera videos, template images, manual test scripts, and bundled third-party binaries are intentionally ignored so the GitHub repository stays focused on source code and reproducible configuration.
 
 Interactive commands:
 
@@ -177,7 +194,7 @@ Constraint summary:
 ## Dependencies
 
 ```bash
-pip install pydantic PyYAML langchain-core langchain-openai pyserial
+pip install -r requirements.txt
 ```
 
 In default mock mode, live Qwen credentials are not required.

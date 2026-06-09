@@ -1,0 +1,37 @@
+runtime:
+  timeline_scheduler:
+    expected_board_ids: ["s31", "p4"]
+    mock_acks: true
+    camera_index: 1
+    yolo_model_path: "models/yolo26n.pt"
+    imgsz: 416
+    conf: 0.25
+    show_window: false
+    cam_width: 1280
+    cam_height: 720
+    display_width: 1600
+    display_height: 760
+
+  arm_safety:
+    enabled: true
+    mode: "clamp"
+    clamp_speed: true
+    x_min: 140.0
+    x_max: 230.0
+    y_min: -50.0
+    y_max: 50.0
+    z_min: 170.0
+    z_max: 235.0
+    t_min: 2.70
+    t_max: 3.30
+    spd_min: 0.05
+    spd_max: 0.18
+    reach_min: 205.0
+    reach_max: 305.0
+    min_x_at_high_z: 155.0
+    max_z_at_low_x: 215.0
+    safe_presets:
+      init: '{"T":100}'
+      low: '{"T":104,"x":170,"y":0,"z":190,"t":3.05,"spd":0.15}'
+      mid: '{"T":104,"x":180,"y":0,"z":205,"t":3.05,"spd":0.15}'
+      high: '{"T":104,"x":185,"y":0,"z":220,"t":3.00,"spd":0.15}'

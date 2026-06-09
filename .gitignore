@@ -24,6 +24,24 @@ ENV/
 logs/
 *.log
 
+# Local runtime overrides
+/config.yaml
+
+# Local model, camera, and vision assets
+/models/
+/vision_templates/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Local/manual test scripts
+/tests/
+/test_*.py
+
+# Bundled third-party binaries and generated web assets
+/webrtc-streamer-v0.8.14-dirty-Windows-AMD64-Release/
+
 # Editor and OS files
 .idea/
 .vscode/

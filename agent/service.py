@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -232,4 +232,6 @@ class PlanAgentService:
 
     @staticmethod
     def _new_session_id() -> str:
-        return uuid.uuid4().hex
+        # Use a readable timestamp-based ID for easier session/log directory management.
+        # Milliseconds are included to avoid collisions when sessions are created quickly.
+        return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]

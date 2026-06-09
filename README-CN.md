@@ -18,7 +18,7 @@ CamBot 使用交互式 LLM Agent 生成顶层拍摄剧本。当前协议是 `Tim
 - 给使用者展示时间轴动作和打光方案 review
 - 支持自然语言多轮修改，直到使用者确认
 - 每个会话保存 JSON、review 文本、对话历史和元信息
-- CLI 与未来网页确认后保存最终 JSON；顶层 Agent 不直接下发硬件
+- CLI 与未来网页确认后保存最终 JSON，并可调用底层 `TimelineScheduler`；顶层 Agent 仍只输出抽象 `TimelineScript`
 
 ## 目录结构
 
@@ -39,6 +39,14 @@ schemas/
   timeline_script_schema.py
 runtime/
   cambot_executor.py
+  timeline_scheduler.py
+  timeline_command_translator.py
+  checkpoint_correction_planner.py
+  subject_match_detector.py
+showcase/
+  index.html
+  styles.css
+  app.js
 providers/
   llm_provider.py
 ```
@@ -67,6 +75,15 @@ python app.py --instruction "先让机器人后退一点，再降低机位，检
 ```bash
 python app.py --instruction "A stable centered shot." --no-execute-after-confirm
 ```
+
+真实硬件运行时可复制本地运行配置样例：
+
+```bash
+copy config\runtime.example.yaml config.yaml
+python app.py --instruction "先后退一点，并检查人物构图。"
+```
+
+`config.yaml`、模型权重、相机视频、视觉模板图、手动测试脚本和第三方二进制包会被忽略，GitHub 仓库只保留源码与可复现配置样例。
 
 交互命令：
 
@@ -177,7 +194,7 @@ Planner 必须返回一个严格 JSON 对象：
 ## 依赖
 
 ```bash
-pip install pydantic PyYAML langchain-core langchain-openai pyserial
+pip install -r requirements.txt
 ```
 
 默认 mock mode 下，不需要真实 Qwen 凭证也能运行。

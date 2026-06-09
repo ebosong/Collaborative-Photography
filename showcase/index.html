@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>语绘镜界 | Timeline Agent 展示台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <p class="kicker">Interactive Timeline Agent for Robotic Cinematography</p>
+        <h1>语绘镜界</h1>
+        <p class="abstract">
+          面向智能拍摄机器人的自然语言规划系统：以本地 RAG 检索与 LLM 规划为入口，
+          生成严格的 TimelineScript，并将构图检查、视觉伺服、机械臂约束与打光意图纳入同一条可验证时间轴。
+        </p>
+      </div>
+      <dl class="paper-facts" aria-label="系统摘要">
+        <div>
+          <dt>Protocol</dt>
+          <dd>TimelineScript 2.0</dd>
+        </div>
+        <div>
+          <dt>Devices</dt>
+          <dd>S3 · P4 · Local Vision</dd>
+        </div>
+        <div>
+          <dt>Mode</dt>
+          <dd>Plan · Review · Confirm</dd>
+        </div>
+      </dl>
+    </header>
+
+    <main>
+      <section class="lab-console" aria-label="视频和 Agent 工作台">
+        <article class="video-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Experiment View</p>
+              <h2>视频展示区</h2>
+            </div>
+            <div class="video-actions" aria-label="视频源切换">
+              <button class="icon-button is-active" type="button" data-video="../stabilized_twopass.mp4" title="稳定化视频">稳定</button>
+              <button class="icon-button" type="button" data-video="../raw_camera1.mp4" title="原始相机视频">原始</button>
+            </div>
+          </div>
+
+          <div class="video-frame">
+            <video id="demoVideo" src="../stabilized_twopass.mp4" controls autoplay muted loop playsinline></video>
+            <div id="videoFallback" class="video-fallback">
+              <strong>本地演示视频未随仓库提交</strong>
+              <span>将 `stabilized_twopass.mp4` 或 `raw_camera1.mp4` 放在项目根目录后，展示区会自动播放。</span>
+            </div>
+            <div class="vision-layer" aria-hidden="true">
+              <div class="rule-line horizontal"></div>
+              <div class="rule-line vertical"></div>
+              <div class="bbox">
+                <span>person/main_actor · 0.91</span>
+              </div>
+              <div class="telemetry">
+                <span>checkpoint cp1</span>
+                <strong>center error 0.03</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="observation-grid">
+            <div>
+              <span class="metric">416</span>
+              <span class="label">YOLO imgsz</span>
+            </div>
+            <div>
+              <span class="metric">0.25</span>
+              <span class="label">confidence</span>
+            </div>
+            <div>
+              <span class="metric">8</span>
+              <span class="label">servo iterations</span>
+            </div>
+            <div>
+              <span class="metric">1280×720</span>
+              <span class="label">camera stream</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="agent-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Plan Agent</p>
+              <h2>Agent 交互区</h2>
+            </div>
+            <span id="sessionState" class="status-pill">draft</span>
+          </div>
+
+          <div id="chatLog" class="chat-log" aria-live="polite">
+            <div class="message assistant">
+              <span>语绘镜界 Agent</span>
+              <p>已载入本地拍摄模板、动作规则与安全约束。请给出一个拍摄意图，我会转写为 TimelineScript。</p>
+            </div>
+            <div class="message user">
+              <span>研究员</span>
+              <p>先后退一点，降低机位，检查人物居中，并使用暖色侧面中光。</p>
+            </div>
+            <div class="message assistant">
+              <span>语绘镜界 Agent</span>
+              <p>已生成 4 个时间轴动作与 1 条打光意图，包含底盘后移、升降杆下降、视觉检查点和构图保持。</p>
+            </div>
+          </div>
+
+          <form id="agentForm" class="agent-form">
+            <label for="promptInput">拍摄意图</label>
+            <textarea id="promptInput" rows="3">让镜头从正面稳定跟拍人物 6 秒，保持半身构图，光线保持中性。</textarea>
+            <div class="form-actions">
+              <button type="submit">生成计划</button>
+              <button type="button" id="reviewButton" class="secondary">Review</button>
+              <button type="button" id="confirmButton" class="secondary">Confirm</button>
+            </div>
+          </form>
+
+          <div class="quick-prompts" aria-label="常用拍摄意图">
+            <button type="button" data-prompt="向后退 20 厘米后降低机位，检查人物居中，暖色侧面中光。">构图检查</button>
+            <button type="button" data-prompt="从侧前方跟随人物 8 秒，保持中景，运动速度保守。">侧前跟拍</button>
+            <button type="button" data-prompt="机械臂先到准备位，再轻微上移，完成稳定的展示镜头。">机械臂展示</button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="research-grid" aria-label="项目能力概览">
+        <article class="protocol-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Validated Protocol</p>
+              <h2>TimelineScript 摘要</h2>
+            </div>
+            <button id="copyJsonButton" type="button" class="secondary small">复制 JSON</button>
+          </div>
+          <pre id="scriptPreview" class="code-block"></pre>
+        </article>
+
+        <article class="method-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Method</p>
+              <h2>系统链路</h2>
+            </div>
+          </div>
+          <ol class="pipeline-list">
+            <li>
+              <strong>自然语言需求</strong>
+              <span>研究员输入拍摄目标、运动倾向、构图要求与打光语义。</span>
+            </li>
+            <li>
+              <strong>本地 JSON RAG</strong>
+              <span>检索 shot_templates、skill_rules、safety_rules，为规划提供可控先验。</span>
+            </li>
+            <li>
+              <strong>严格 JSON 规划</strong>
+              <span>Planner 输出 TimelineScript，JsonRepairer 与 Pydantic schema 负责修复和验证。</span>
+            </li>
+            <li>
+              <strong>视觉检查与执行</strong>
+              <span>checkpoint/follow_mode 由下层视觉伺服转为 S3/P4 与本地调度动作。</span>
+            </li>
+          </ol>
+        </article>
+
+        <article class="capability-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Robot Interface</p>
+              <h2>执行与安全</h2>
+            </div>
+          </div>
+          <div class="capability-list">
+            <div>
+              <span>S3 Base</span>
+              <strong>longitudinal · rotate · lift_delta</strong>
+            </div>
+            <div>
+              <span>P4 Arm</span>
+              <strong>init_pose · move_delta · move_xyz</strong>
+            </div>
+            <div>
+              <span>Vision</span>
+              <strong>checkpoint · follow_mode · bbox servo</strong>
+            </div>
+            <div>
+              <span>Safety Envelope</span>
+              <strong>x/y/z/t clamp · speed clamp · reach guard</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>语绘镜界 · CamBot Interactive Timeline Agent</span>
+      <span>Web-ready API: create_session · send_message · review_plan · confirm_plan</span>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
